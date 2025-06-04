@@ -10,6 +10,8 @@ import torch.nn.functional as F
 import numpy as np
 import cv2
 
+from model.RAFT.raft import RAFT # Assuming this is correctly pathed
+from .adaptive_sampler import AdaptiveDownsamplerSTN # Import the new module
 
 
 class Denoise_1(nn.Module):
@@ -91,7 +93,7 @@ class Network(nn.Module):
         self.denoise_2 = Denoise_2(chan_embed=48)
         self._l2_loss = nn.MSELoss()
         self._l1_loss = nn.L1Loss()
-        self.is_WB = True if 'underwater' == args.dataset else False
+        self.is_WB = True if 'underwater' in args.dataset.lower() else False 
         self._criterion = LossFunction(self.is_WB)
         self.avgpool = nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
         self.TextureDifference = TextureDifference()
@@ -102,9 +104,17 @@ class Network(nn.Module):
         self.last_s3_wp = None
         self.is_new_seq = True
 
+        self.adaptive_downsampler = AdaptiveDownsamplerSTN(
+            output_size_reduction_factor=args.of_scale,
+            min_stn_scale=1.0 / (args.of_scale + 1.0), # e.g., if of_scale=3, min_s = 0.25 (for 4x effective zoom out)
+            max_stn_scale=1.0 / max(1.5, args.of_scale - 1.0), # e.g., if of_scale=3, max_s = 0.5 (for 2x effective zoom out)
+            device=torch.device("cuda" if args.cuda else "cpu")
+        )
+        self.padder = None # Initialize padder, will be created on first use if needed by RAFT
+
+
         # optical flow
         self.raft = self.load_raft(args)
-        self.of_scale = args.of_scale
 
     def load_raft(self, args):
         raft = torch.nn.DataParallel(RAFT(args))
@@ -221,39 +231,65 @@ class Network(nn.Module):
         self.last_s3 = s3.detach()
 
     def update_cache(self, last_H3, last_s3, L2):
-        # 0. resize
-        ht_org, wd_org = last_H3[0].shape[-2:]
-        ht = ht_org // self.of_scale
-        wd = wd_org // self.of_scale
-        last_H3_tmp = F.interpolate(last_H3, (ht,wd), mode='bilinear')
-        L2_tmp = F.interpolate(L2, (ht,wd), mode='bilinear')
+        # `last_H3_cache` and `last_s3_cache` are the stored self.last_H3, self.last_s3
+        # `current_L2_detached` is L2.detach() from the current frame
 
-        # 1. Equalize the histogram
-        # last_H3_tmp = equalize((last_H3_tmp * 255).to(torch.uint8))
-        last_H3_tmp = last_H3_tmp * 255
-        last_H3_tmp = last_H3_tmp.to(torch.float32) #/ 255.0
+        # Adaptive downsampling
+        # last_H3_tmp will be R(t-1)_RD downsampled
+        # L2_tmp will be I_t_LD (denoised current input) downsampled
+        last_H3_tmp, _ = self.adaptive_downsampler(last_H3_cache)
+        L2_tmp, _ = self.adaptive_downsampler(current_L2_detached)
 
-        L2_tmp = equalize((L2_tmp * 255).to(torch.uint8))
-        L2_tmp = L2_tmp.to(torch.float32) #/ 255.0
+        # Preprocessing for RAFT input based on Zero-TIG paper
+        # Input 1 to RAFT: R(t-1)_RD (last_H3_tmp). Paper implies it's used directly or after simple scaling.
+        # Your original code scaled it to [0, 255] then float. Let's assume RAFT handles [0,1] for now.
+        # If RAFT expects [0,255], scaling is needed: raft_input1 = last_H3_tmp * 255
+        raft_input1 = last_H3_tmp
 
-        # 2. OF last->this
-        # last_H3_tmp, L2_tmp = self.padder.pad(last_H3_tmp, L2_tmp) # [640, 360]
-        _, flow_up = self.raft(last_H3_tmp, L2_tmp, iters=20, test_mode=True)
-        # viz(last_H3_tmp, flow_up)
+        # Input 2 to RAFT: HE(I_t_LD) (L2_tmp after HE)
+        # Ensure L2_tmp is in [0,1] before scaling to uint8 for equalize
+        L2_tmp_clamped = torch.clamp(L2_tmp, 0, 1)
+        L2_tmp_uint8 = (L2_tmp_clamped * 255).to(torch.uint8)
+        raft_input2 = equalize(L2_tmp_uint8).to(torch.float32) / 255.0
 
-        # 3. Warp
-        warped_tensor_H3, overlap_tensor = warp_tensor(flow_up, last_H3, L2)
-        warped_tensor_s3, _ = warp_tensor(flow_up, last_s3, L2)
-        # warped_img = self.cvt_ts2np(warped_tensor)
-        # overlap_img = self.cvt_ts2np(overlap_tensor)
-        #
-        # img_flo = cv2.resize(np.concatenate([warped_img, overlap_img], axis=0), (1920, 2160))
-        # cv2.imshow('image', img_flo)
-        # cv2.waitKey(5)
-        # cv2.imwrite('./img_flo.png', (img_flo*255).astype(np.uint8))
+        # Pad inputs if RAFT requires specific divisibility (e.g., by 8)
+        # This should be done *after* adaptive downsampling and HE.
+        if self.padder is None or self.padder.original_shape != raft_input1.shape:
+             # Assuming RAFT needs divisibility by 8, adjust as needed
+            self.padder = InputPadder(raft_input1.shape, divis_by=8)
+        
+        raft_input1_padded, raft_input2_padded = self.padder.pad(raft_input1, raft_input2)
 
-        return warped_tensor_H3, warped_tensor_s3
+        # 2. Optical Flow Computation
+        # RAFT usually expects inputs in range [0, 255] or normalized to [-1, 1].
+        # The original RAFT implementation often does internal normalization.
+        # Let's assume current RAFT wrapper handles [0,1] or does its own normalization.
+        # If it strictly needs [0,255]:
+        #   raft_input1_final = raft_input1_padded * 255
+        #   raft_input2_final = raft_input2_padded * 255
+        # Or for [-1,1]:
+        #   raft_input1_final = raft_input1_padded * 2.0 - 1.0
+        #   raft_input2_final = raft_input2_padded * 2.0 - 1.0
+        # For now, assuming [0,1] is fine for the RAFT call.
+        _, flow_predicted_padded = self.raft(raft_input1_padded, raft_input2_padded, iters=20, test_mode=True)
+        
+        flow_predicted = self.padder.unpad(flow_predicted_padded) # Unpad the flow
 
+        # 3. Upsample flow and Warp
+        original_ht, original_wd = last_H3_cache.shape[-2:] # Target size for warping is original full-res
+
+        flow_upsampled = F.interpolate(flow_predicted, size=(original_ht, original_wd), mode='bilinear', align_corners=False)
+        # Scale flow vectors
+        scale_w = float(original_wd) / float(flow_predicted.shape[3]) # wd_orig / wd_small
+        scale_h = float(original_ht) / float(flow_predicted.shape[2]) # ht_orig / ht_small
+        flow_upsampled[:, 0, :, :] *= scale_w
+        flow_upsampled[:, 1, :, :] *= scale_h
+
+        # Warp original full-resolution tensors using the upscaled and scaled flow
+        warped_H3, _ = warp_tensor(flow_upsampled, last_H3_cache, current_L2_detached) # current_L2_detached for target grid
+        warped_s3, _ = warp_tensor(flow_upsampled, last_s3_cache, current_L2_detached)
+
+        return warped_H3, warped_s3
 
 class Finetunemodel(nn.Module):
 
@@ -278,9 +314,18 @@ class Finetunemodel(nn.Module):
         self.last_s3_wp = None
         self.is_new_seq = True
 
+        # Initialize Adaptive Downsampler for Optical Flow
+        self.adaptive_downsampler = AdaptiveDownsamplerSTN(
+            output_size_reduction_factor=args.of_scale,
+            min_stn_scale=1.0 / (args.of_scale + 1.0),
+            max_stn_scale=1.0 / max(1.5, args.of_scale - 1.0),
+            device=torch.device("cuda" if args.cuda else "cpu") # Add args.cuda check
+        )
+        self.padder = None # Initialize padder for RAFT inputs
+
+
         # optical flow
         self.raft = self.load_raft(args)
-        self.of_scale = args.of_scale
 
 
     def load_raft(self, args):
@@ -341,36 +386,37 @@ class Finetunemodel(nn.Module):
         self.last_H3 = H3.detach()
         self.last_s3 = s3.detach()
 
-    def update_cache(self, last_H3, last_s3, L2):
-        # 0. resize
-        ht_org, wd_org = last_H3[0].shape[-2:]
-        ht = ht_org // self.of_scale
-        wd = wd_org // self.of_scale
-        last_H3_tmp = F.interpolate(last_H3, (ht, wd), mode='bilinear')
-        L2_tmp = F.interpolate(L2, (ht, wd), mode='bilinear')
+    def update_cache(self, last_H3_cache, last_s3_cache, current_L2_detached):
+        # Adaptive downsampling
+        last_H3_tmp, _ = self.adaptive_downsampler(last_H3_cache)
+        L2_tmp, _ = self.adaptive_downsampler(current_L2_detached)
 
-        # 1. Equalize the histogram
-        # last_H3_tmp = equalize((last_H3_tmp * 255).to(torch.uint8))
-        last_H3_tmp = last_H3_tmp * 255
-        last_H3_tmp = last_H3_tmp.to(torch.float32)  # / 255.0
+        # Preprocessing for RAFT input
+        raft_input1 = last_H3_tmp
+        L2_tmp_clamped = torch.clamp(L2_tmp, 0, 1)
+        L2_tmp_uint8 = (L2_tmp_clamped * 255).to(torch.uint8)
+        raft_input2 = equalize(L2_tmp_uint8).to(torch.float32) / 255.0
+        
+        # Pad inputs if RAFT requires specific divisibility
+        if self.padder is None or self.padder.original_shape != raft_input1.shape:
+            self.padder = InputPadder(raft_input1.shape, divis_by=8) # Assuming InputPadder is accessible
+        
+        raft_input1_padded, raft_input2_padded = self.padder.pad(raft_input1, raft_input2)
 
-        L2_tmp = equalize((L2_tmp * 255).to(torch.uint8))
-        L2_tmp = L2_tmp.to(torch.float32)  # / 255.0
+        # 2. Optical Flow Computation
+        _, flow_predicted_padded = self.raft(raft_input1_padded, raft_input2_padded, iters=20, test_mode=True)
+        flow_predicted = self.padder.unpad(flow_predicted_padded)
 
-        # 2. OF last->this
-        # last_H3_tmp, L2_tmp = self.padder.pad(last_H3_tmp, L2_tmp) # [640, 360]
-        _, flow_up = self.raft(last_H3_tmp, L2_tmp, iters=20, test_mode=True)
-        # viz(last_H3_tmp, flow_up)
+        # 3. Upsample flow and Warp
+        original_ht, original_wd = last_H3_cache.shape[-2:]
+        flow_upsampled = F.interpolate(flow_predicted, size=(original_ht, original_wd), mode='bilinear', align_corners=False)
+        scale_w = float(original_wd) / float(flow_predicted.shape[3])
+        scale_h = float(original_ht) / float(flow_predicted.shape[2])
+        flow_upsampled[:, 0, :, :] *= scale_w
+        flow_upsampled[:, 1, :, :] *= scale_h
 
-        # 3. Warp
-        warped_tensor_H3, overlap_tensor = warp_tensor(flow_up, last_H3, L2)
-        warped_tensor_s3, _ = warp_tensor(flow_up, last_s3, L2)
-        # warped_img = self.cvt_ts2np(warped_tensor)
-        # overlap_img = self.cvt_ts2np(overlap_tensor)
-        #
-        # img_flo = cv2.resize(np.concatenate([warped_img, overlap_img], axis=0), (1920, 2160))
-        # cv2.imshow('image', img_flo)
-        # cv2.waitKey(5)
-        # cv2.imwrite('./img_flo.png', (img_flo*255).astype(np.uint8))
+        warped_H3, _ = warp_tensor(flow_upsampled, last_H3_cache, current_L2_detached)
+        warped_s3, _ = warp_tensor(flow_upsampled, last_s3_cache, current_L2_detached)
 
-        return warped_tensor_H3, warped_tensor_s3
+        return warped_H3, warped_s3
+        
