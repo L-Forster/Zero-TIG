@@ -33,6 +33,7 @@ parser.add_argument('--seed', type=int, default=2, help='random seed')
 parser.add_argument('--raft_model', type=str, default='./weights/raft-sintel.pth', help='path to pre-trained raft model')
 parser.add_argument('--of_scale', type=int, default=3, help='downscale size when compute OF')
 parser.add_argument('--dataset', type=str, default='RLV', help='Specified data set')
+parser.add_argument('--num_workers', type=int, default=0, help='number of dataloader workers')
 
 args = parser.parse_args()
 save_path = args.save
@@ -47,7 +48,7 @@ logging.getLogger().addHandler(mertic)
 
 logging.info("train file name = %s", os.path.split(__file__))
 TestDataset = CreateDataset(args, task='test')
-test_queue = torch.utils.data.DataLoader(TestDataset, batch_size=1, pin_memory=True, num_workers=0, shuffle=False)
+test_queue = torch.utils.data.DataLoader(TestDataset, batch_size=1, pin_memory=True, num_workers=args.num_workers, shuffle=False)
 print("Total image number: ", str(TestDataset.__len__()))
 
 logging.info("Model path = %s", str(args.model_pretrain))

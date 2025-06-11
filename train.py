@@ -18,13 +18,14 @@ parser.add_argument('--cuda', default=True, type=bool, help='Use CUDA to train m
 parser.add_argument('--gpu', type=str, default='0', help='gpu device id')
 parser.add_argument('--seed', type=int, default=2, help='random seed')
 parser.add_argument('--epochs', type=int, default=5, help='epochs')
-parser.add_argument('--lr', type=float, default=0.0003, help='learning rate')
+parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
 parser.add_argument('--save', type=str, default='./EXP/', help='location of the data corpus')
 parser.add_argument('--model_pretrain', type=str, help='location of the data corpus')
 parser.add_argument('--lowlight_images_path', type=str,default='',help='input data folder')
 parser.add_argument('--raft_model', type=str, default='./weights/raft-sintel.pth', help='path to pre-trained raft model')
 parser.add_argument('--of_scale', type=int, default=3, help='downscale size when compute OF')
 parser.add_argument('--dataset', type=str, default='RLV', help='Specified data set')
+parser.add_argument('--num_workers', type=int, default=0, help='number of dataloader workers')
 
 args = parser.parse_args()
 
@@ -107,10 +108,10 @@ def main():
 
     train_queue = torch.utils.data.DataLoader(
         TrainDataset, batch_size=args.batch_size,
-        pin_memory=True, num_workers=0, shuffle=False, generator=torch.Generator(device='cuda'))
+        pin_memory=True, num_workers=args.num_workers, shuffle=False, generator=torch.Generator(device='cuda'))
     test_queue = torch.utils.data.DataLoader(
         TestDataset, batch_size=1,
-        pin_memory=True, num_workers=0, shuffle=False, generator=torch.Generator(device='cuda'))
+        pin_memory=True, num_workers=args.num_workers, shuffle=False, generator=torch.Generator(device='cuda'))
 
     total_step = 0
     model.train()
