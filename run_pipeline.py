@@ -98,7 +98,7 @@ def main():
         train_cmd = [
             'python', 'train.py',
             '--dataset', dataset_name,
-            '--lowlight_images_path', args.base_data_dir, # train.py expects the parent of the dataset folder
+            '--lowlight_images_path', dataset_dir,
             '--model_pretrain', pretrain_weights_path,
             '--save', train_base_dir,
             '--epochs', str(args.epochs),
@@ -126,10 +126,9 @@ def main():
         eval_cmd = [
             'python', 'evals.py',
             '--dataset', dataset_name,
-            '--lowlight_images_path', args.base_data_dir,
+            '--lowlight_images_path', dataset_dir,
             '--model_pretrain', final_weights_path,
-            '--save', eval_save_dir,
-            '--num_workers', str(args.num_workers)
+            '--save', eval_save_dir
         ]
         if not run_command(eval_cmd, logger):
             logger.error(f"Evaluation failed for {dataset_name}. Skipping to next dataset.")
