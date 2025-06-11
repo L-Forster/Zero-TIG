@@ -5,6 +5,7 @@ import logging
 import argparse
 import subprocess
 import pandas as pd
+import json
 
 def setup_logging(log_file):
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
@@ -120,30 +121,15 @@ def main():
             
         logger.info(f"Training complete. Using final weights: {final_weights_path}")
 
-        # --- 2. PREDICTION ---
-        logger.info(f"--- Stage 2: Predicting with fine-tuned model for {dataset_name} ---")
-        predict_cmd = [
-            'python', 'predict.py',
+        # --- 2. EVALUATION (Evaluation script now runs its own inference) ---
+        logger.info(f"--- Stage 2: Evaluating predictions for {dataset_name} ---")
+        eval_cmd = [
+            'python', 'evals.py',
             '--dataset', dataset_name,
             '--lowlight_images_path', args.base_data_dir,
             '--model_pretrain', final_weights_path,
-            '--save', predict_save_dir,
+            '--save', eval_save_dir,
             '--num_workers', str(args.num_workers)
-        ]
-        if not run_command(predict_cmd, logger):
-            logger.error(f"Prediction failed for {dataset_name}. Skipping to next dataset.")
-            continue
-        logger.info(f"Prediction complete. Outputs saved to: {predict_save_dir}")
-
-        # --- 3. EVALUATION ---
-        logger.info(f"--- Stage 3: Evaluating predictions for {dataset_name} ---")
-        eval_cmd = [
-            'python', 'evals.py',
-            '--prediction_source_dir', predict_save_dir,
-            '--gt_base_dir', current_gt_dir,
-            '--test_list_file', current_test_list,
-            '--save_dir_base', eval_save_dir,
-            '--evaluation_name', f'{dataset_name}_final_evaluation'
         ]
         if not run_command(eval_cmd, logger):
             logger.error(f"Evaluation failed for {dataset_name}. Skipping to next dataset.")
@@ -151,14 +137,16 @@ def main():
             
         logger.info(f"Evaluation complete. Reports saved in: {eval_save_dir}")
 
-        # --- 4. LOG FINAL RESULTS ---
-        summary_csv_path = os.path.join(eval_save_dir, f'{dataset_name}_final_evaluation', 'summary_overall.csv')
-        if os.path.exists(summary_csv_path):
-            df = pd.read_csv(summary_csv_path)
+        # --- 3. LOG FINAL RESULTS ---
+        summary_json_path = os.path.join(eval_save_dir, 'Metrics.json')
+        if os.path.exists(summary_json_path):
+            with open(summary_json_path, 'r') as f:
+                metrics = json.load(f)
+            df = pd.DataFrame([metrics])
             logger.info(f"--- FINAL PERFORMANCE for {dataset_name} ---")
             logger.info("\n" + df.to_string())
         else:
-            logger.warning(f"Could not find summary file to log final results: {summary_csv_path}")
+            logger.warning(f"Could not find summary file to log final results: {summary_json_path}")
 
         logger.info(f"========== FINISHED DATASET: {dataset_name} ==========\n")
 
