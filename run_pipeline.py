@@ -49,11 +49,9 @@ def run_command(command, logger):
 def main():
     parser = argparse.ArgumentParser(description="Run the complete Zero-TIG training, prediction, and evaluation pipeline.")
     parser.add_argument('--datasets', nargs='+', required=True,
-                        help="List of dataset names to process (e.g., RLV LOL-v1).")
-    parser.add_argument('--base_data_dir', type=str, default='./lowlight_dataset/',
-                        help="Base directory containing dataset folders and the 'gt' folder.")
-    parser.add_argument('--test_list_file', type=str, default='./lowlight_dataset/test_list.txt',
-                        help="Path to the test_list.txt file, which defines the sequences to evaluate.")
+                        help="List of dataset names to process (e.g., RLV LOL-v1). Each name must correspond to a folder in the base_data_dir.")
+    parser.add_argument('--base_data_dir', type=str, default='./data/',
+                        help="The base directory that CONTAINS all individual dataset folders (e.g., ./data/RLV, ./data/AnotherDataset).")
     parser.add_argument('--weights_dir', type=str, default='./weights/',
                         help="Directory containing pre-trained model weights.")
     parser.add_argument('--pretrain_weights_file', type=str, default='BVI-RLV.pt',
@@ -84,13 +82,22 @@ def main():
         os.makedirs(eval_save_dir, exist_ok=True)
 
         pretrain_weights_path = os.path.join(args.weights_dir, args.pretrain_weights_file)
+        
+        # --- Paths specific to the current dataset ---
+        dataset_dir = os.path.join(args.base_data_dir, dataset_name)
+        current_test_list = os.path.join(dataset_dir, 'test_list.txt')
+        current_gt_dir = os.path.join(dataset_dir, 'gt')
+
+        if not os.path.isdir(dataset_dir):
+            logger.error(f"Dataset directory not found: {dataset_dir}. Skipping.")
+            continue
 
         # --- 1. TRAINING ---
         logger.info(f"--- Stage 1: Training on {dataset_name} ---")
         train_cmd = [
             'python', 'train.py',
             '--dataset', dataset_name,
-            '--lowlight_images_path', args.base_data_dir,
+            '--lowlight_images_path', args.base_data_dir, # train.py expects the parent of the dataset folder
             '--model_pretrain', pretrain_weights_path,
             '--save', train_base_dir,
             '--epochs', str(args.epochs),
@@ -133,8 +140,8 @@ def main():
         eval_cmd = [
             'python', 'evals.py',
             '--prediction_source_dir', predict_save_dir,
-            '--gt_base_dir', os.path.join(args.base_data_dir, 'gt'),
-            '--test_list_file', args.test_list_file,
+            '--gt_base_dir', current_gt_dir,
+            '--test_list_file', current_test_list,
             '--save_dir_base', eval_save_dir,
             '--evaluation_name', f'{dataset_name}_final_evaluation'
         ]
