@@ -20,6 +20,7 @@ import json
 
 # Check if CUDA is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.set_default_device(device)
 print("Using device:", device)
 
 parser = argparse.ArgumentParser("ZERO-IG")

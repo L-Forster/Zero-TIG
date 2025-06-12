@@ -237,9 +237,18 @@ class Network(nn.Module):
 
         # 2. OF last->this
         # last_H3_tmp, L2_tmp = self.padder.pad(last_H3_tmp, L2_tmp) # [640, 360]
-        inputs = {'images': torch.cat([last_H3_tmp, L2_tmp], dim=0)}
-        outputs = self.dpflow(inputs)
-        flow_up = outputs['flows'][-1]
+        
+        # Ensure dpflow model is on the same device as the inputs
+        self.dpflow = self.dpflow.to(L2.device)
+        self.dpflow.eval()  # Ensure model is in eval mode
+        
+        # Use ptlflow forward method with correct input format
+        with torch.no_grad():
+            # Stack images along batch dimension for ptlflow input format
+            images_tensor = torch.stack([last_H3_tmp[0], L2_tmp[0]], dim=0).unsqueeze(0)  # [1, 2, C, H, W]
+            inputs = {'images': images_tensor}
+            outputs = self.dpflow(inputs)
+            flow_up = outputs['flows'][-1]
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
@@ -359,9 +368,18 @@ class Finetunemodel(nn.Module):
 
         # 2. OF last->this
         # last_H3_tmp, L2_tmp = self.padder.pad(last_H3_tmp, L2_tmp) # [640, 360]
-        inputs = {'images': torch.cat([last_H3_tmp, L2_tmp], dim=0)}
-        outputs = self.dpflow(inputs)
-        flow_up = outputs['flows'][-1]
+        
+        # Ensure dpflow model is on the same device as the inputs
+        self.dpflow = self.dpflow.to(L2.device)
+        self.dpflow.eval()  # Ensure model is in eval mode
+        
+        # Use ptlflow forward method with correct input format
+        with torch.no_grad():
+            # Stack images along batch dimension for ptlflow input format
+            images_tensor = torch.stack([last_H3_tmp[0], L2_tmp[0]], dim=0).unsqueeze(0)  # [1, 2, C, H, W]
+            inputs = {'images': images_tensor}
+            outputs = self.dpflow(inputs)
+            flow_up = outputs['flows'][-1]
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp

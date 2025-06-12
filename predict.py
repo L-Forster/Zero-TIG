@@ -14,6 +14,7 @@ from utils.utils import sequential_judgment
 
 # Check if CUDA is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.set_default_device(device)
 print("Using device:", device)
 
 root_dir = os.path.abspath('../')

@@ -47,7 +47,7 @@ logging.info("train file name = %s", os.path.split(__file__))
 
 if torch.cuda.is_available():
     if args.cuda:
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
+        torch.set_default_device('cuda')
     if not args.cuda:
         print("WARNING: It looks like you have a CUDA device, but aren't " +
               "using CUDA.\nRun with --cuda for optimal training speed.")
