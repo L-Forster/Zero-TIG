@@ -140,7 +140,8 @@ def main():
         # Add SDSD-specific arguments
         if dataset_name in ['SDSD-indoor', 'SDSD-outdoor']:
             subdataset = dataset_name.split('-')[1]  # 'indoor' or 'outdoor'
-            train_cmd.extend(['--sdsd_subset', subdataset])
+            # Instead of passing sdsd_subset, we'll handle this in the dataloader
+            # The dataset_type is already set to 'SDSD' above
             
         if not run_command(train_cmd, logger):
             logger.error(f"Training failed for {dataset_name}. Skipping to next dataset.")
@@ -172,7 +173,8 @@ def main():
         # Add SDSD-specific arguments for evaluation too
         if dataset_name in ['SDSD-indoor', 'SDSD-outdoor']:
             subdataset = dataset_name.split('-')[1]  # 'indoor' or 'outdoor'
-            eval_cmd.extend(['--sdsd_subset', subdataset])
+            # Instead of passing sdsd_subset, we'll handle this in the dataloader
+            # The dataset_type is already set to 'SDSD' above
             
         if not run_command(eval_cmd, logger):
             logger.error(f"Evaluation failed for {dataset_name}. Skipping to next dataset.")
