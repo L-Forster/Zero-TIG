@@ -22,7 +22,7 @@ parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
 parser.add_argument('--save', type=str, default='./EXP/', help='location of the data corpus')
 parser.add_argument('--model_pretrain', type=str, help='location of the data corpus')
 parser.add_argument('--lowlight_images_path', type=str,default='',help='input data folder')
-parser.add_argument('--raft_model', type=str, default='./weights/raft-sintel.pth', help='path to pre-trained raft model')
+parser.add_argument('--dpflow_model', type=str, default='dpflow', help='DPFlow model name for optical flow')
 parser.add_argument('--of_scale', type=int, default=3, help='downscale size when compute OF')
 parser.add_argument('--dataset', type=str, default='RLV', help='Specified data set')
 parser.add_argument('--num_workers', type=int, default=0, help='number of dataloader workers')
@@ -47,7 +47,7 @@ logging.info("train file name = %s", os.path.split(__file__))
 
 if torch.cuda.is_available():
     if args.cuda:
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
+        torch.set_default_device('cuda')
     if not args.cuda:
         print("WARNING: It looks like you have a CUDA device, but aren't " +
               "using CUDA.\nRun with --cuda for optimal training speed.")

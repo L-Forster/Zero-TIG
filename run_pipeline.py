@@ -7,6 +7,19 @@ import subprocess
 import pandas as pd
 import json
 
+def get_dataset_type(dataset_dir_name):
+    """Map directory names to dataset types expected by the scripts"""
+    mapping = {
+        'lowlight_dataset': 'RLV',  # User's RLV directory is named this
+        'RLV': 'RLV',
+        'BVI-RLV': 'RLV', 
+        'DID_1080': 'DID',
+        'SDSD-indoor': 'SDSD',  # Use SDSD loader for indoor
+        'SDSD-outdoor': 'SDSD',  # Use SDSD loader for outdoor
+        '3_SDSD': 'SDSD',  # Handle the actual SDSD directory name
+    }
+    return mapping.get(dataset_dir_name, dataset_dir_name)
+
 def setup_logging(log_file):
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
     # Remove existing handlers to avoid duplicate logs
@@ -71,7 +84,18 @@ def main():
 
     logger.info(f"Starting pipeline with arguments: {args}")
 
+    # Expand SDSD datasets to handle indoor/outdoor split
+    expanded_datasets = []
     for dataset_name in args.datasets:
+        if dataset_name in ['SDSD-indoor', 'SDSD-outdoor']:
+            expanded_datasets.append(dataset_name)
+        elif dataset_name == '3_SDSD':
+            # Split into indoor and outdoor
+            expanded_datasets.extend(['SDSD-indoor', 'SDSD-outdoor'])
+        else:
+            expanded_datasets.append(dataset_name)
+
+    for dataset_name in expanded_datasets:
         logger.info(f"========== PROCESSING DATASET: {dataset_name} ==========")
 
         # --- Setup paths for the current dataset ---
@@ -85,7 +109,12 @@ def main():
         pretrain_weights_path = os.path.join(args.weights_dir, args.pretrain_weights_file)
         
         # --- Paths specific to the current dataset ---
-        dataset_dir = os.path.join(args.base_data_dir, dataset_name)
+        # Handle SDSD special case
+        if dataset_name in ['SDSD-indoor', 'SDSD-outdoor']:
+            dataset_dir = os.path.join(args.base_data_dir, '3_SDSD')
+        else:
+            dataset_dir = os.path.join(args.base_data_dir, dataset_name)
+            
         current_test_list = os.path.join(dataset_dir, 'test_list.txt')
         current_gt_dir = os.path.join(dataset_dir, 'gt')
 
@@ -95,15 +124,24 @@ def main():
 
         # --- 1. TRAINING ---
         logger.info(f"--- Stage 1: Training on {dataset_name} ---")
+        dataset_type = get_dataset_type(dataset_name)
+        logger.info(f"Using dataset type: {dataset_type} for directory: {dataset_name}")
+        
         train_cmd = [
             'python', 'train.py',
-            '--dataset', dataset_name,
+            '--dataset', dataset_type,
             '--lowlight_images_path', dataset_dir,
             '--model_pretrain', pretrain_weights_path,
             '--save', train_base_dir,
             '--epochs', str(args.epochs),
             '--num_workers', str(args.num_workers)
         ]
+        
+        # Add SDSD-specific arguments
+        if dataset_name in ['SDSD-indoor', 'SDSD-outdoor']:
+            subdataset = dataset_name.split('-')[1]  # 'indoor' or 'outdoor'
+            train_cmd.extend(['--sdsd_subset', subdataset])
+            
         if not run_command(train_cmd, logger):
             logger.error(f"Training failed for {dataset_name}. Skipping to next dataset.")
             continue
@@ -125,11 +163,17 @@ def main():
         logger.info(f"--- Stage 2: Evaluating predictions for {dataset_name} ---")
         eval_cmd = [
             'python', 'evals.py',
-            '--dataset', dataset_name,
+            '--dataset', dataset_type,
             '--lowlight_images_path', dataset_dir,
             '--model_pretrain', final_weights_path,
             '--save', eval_save_dir
         ]
+        
+        # Add SDSD-specific arguments for evaluation too
+        if dataset_name in ['SDSD-indoor', 'SDSD-outdoor']:
+            subdataset = dataset_name.split('-')[1]  # 'indoor' or 'outdoor'
+            eval_cmd.extend(['--sdsd_subset', subdataset])
+            
         if not run_command(eval_cmd, logger):
             logger.error(f"Evaluation failed for {dataset_name}. Skipping to next dataset.")
             continue

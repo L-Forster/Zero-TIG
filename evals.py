@@ -20,6 +20,7 @@ import json
 
 # Check if CUDA is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.set_default_device(device)
 print("Using device:", device)
 
 parser = argparse.ArgumentParser("ZERO-IG")
@@ -33,7 +34,7 @@ parser.add_argument('--model_pretrain', type=str,
                     help='location of the data corpus')
 parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
 parser.add_argument('--seed', type=int, default=2, help='random seed')
-parser.add_argument('--raft_model', type=str, default='./weights/raft-sintel.pth', help='path to pre-trained raft model')
+parser.add_argument('--dpflow_model', type=str, default='dpflow', help='DPFlow model name for optical flow')
 parser.add_argument('--of_scale', type=int, default=3, help='downscale size when compute OF')
 parser.add_argument('--dataset', type=str, default='RLV', help='Specified data set')
 parser.add_argument('--gain', type=int, default=100, help='OF loss gain')
