@@ -276,29 +276,34 @@ class SDSDDataloader(BaseDataset):
             return img_list
         
         for line in phase_list:
-            file_path = line.strip()
-            if not file_path:
+            pair_dir_name = line.strip()
+            if not pair_dir_name:
                 continue
+            
+            # Construct path to the pair directory
+            current_pair_dir = os.path.join(subset_dir, pair_dir_name)
+            
+            if os.path.isdir(current_pair_dir):
+                # Find image files in the directory
+                img_files = glob.glob(os.path.join(current_pair_dir, '*.png'))
+                img_files.extend(glob.glob(os.path.join(current_pair_dir, '*.jpg')))
                 
-            # The file path might be relative to the subset directory
-            full_path = os.path.join(subset_dir, file_path)
-            
-            # Check different possible extensions and paths
-            possible_paths = [
-                full_path,
-                full_path + '.png',
-                full_path + '.jpg',
-                os.path.join(subset_dir, os.path.basename(file_path)),
-                os.path.join(subset_dir, os.path.basename(file_path) + '.png'),
-                os.path.join(subset_dir, os.path.basename(file_path) + '.jpg')
-            ]
-            
-            for path in possible_paths:
-                if os.path.exists(path):
-                    img_list.append(path)
-                    break
+                # Identify the low-light image (assuming it's not the ground truth)
+                low_light_file = None
+                for f in img_files:
+                    if 'gt' not in f.lower() and 'normal' not in f.lower():
+                        low_light_file = f
+                        break  # Take the first non-GT image
+                
+                if low_light_file:
+                    img_list.append(low_light_file)
+                # If no specific file found, take the first image available
+                elif len(img_files) > 0:
+                    img_list.append(img_files[0])
+                else:
+                    print(f"No images found in directory: {current_pair_dir}")
             else:
-                print(f"Could not find file: {file_path} in any of the expected locations")
+                print(f"Could not find file or directory: {current_pair_dir} (from line '{pair_dir_name}')")
 
         # Sort file by name
         img_list = self.sort_files_by_name(img_list)
