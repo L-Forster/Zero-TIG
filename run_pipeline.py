@@ -10,7 +10,7 @@ import json
 def get_dataset_type(dataset_dir_name):
     """Map directory names to dataset types expected by the scripts"""
     mapping = {
-        'lowlight_dataset': 'RLV',  # User's RLV directory is named this
+        'lowlight_dataset': 'lowlight_dataset',  # Use lowlight_dataset as the dataset type
         'RLV': 'RLV',
         'BVI-RLV': 'RLV', 
         'DID_1080': 'DID',
@@ -84,18 +84,7 @@ def main():
 
     logger.info(f"Starting pipeline with arguments: {args}")
 
-    # Expand SDSD datasets to handle indoor/outdoor split
-    expanded_datasets = []
     for dataset_name in args.datasets:
-        if dataset_name in ['SDSD-indoor', 'SDSD-outdoor']:
-            expanded_datasets.append(dataset_name)
-        elif dataset_name == '3_SDSD':
-            # Split into indoor and outdoor
-            expanded_datasets.extend(['SDSD-indoor', 'SDSD-outdoor'])
-        else:
-            expanded_datasets.append(dataset_name)
-
-    for dataset_name in expanded_datasets:
         logger.info(f"========== PROCESSING DATASET: {dataset_name} ==========")
 
         # --- Setup paths for the current dataset ---
@@ -109,11 +98,7 @@ def main():
         pretrain_weights_path = os.path.join(args.weights_dir, args.pretrain_weights_file)
         
         # --- Paths specific to the current dataset ---
-        # Handle SDSD special case
-        if dataset_name in ['SDSD-indoor', 'SDSD-outdoor']:
-            dataset_dir = os.path.join(args.base_data_dir, '3_SDSD')
-        else:
-            dataset_dir = os.path.join(args.base_data_dir, dataset_name)
+        dataset_dir = os.path.join(args.base_data_dir, dataset_name)
             
         current_test_list = os.path.join(dataset_dir, 'test_list.txt')
         current_gt_dir = os.path.join(dataset_dir, 'gt')
@@ -137,12 +122,6 @@ def main():
             '--num_workers', str(args.num_workers)
         ]
         
-        # Add SDSD-specific arguments
-        if dataset_name in ['SDSD-indoor', 'SDSD-outdoor']:
-            subdataset = dataset_name.split('-')[1]  # 'indoor' or 'outdoor'
-            # Instead of passing sdsd_subset, we'll handle this in the dataloader
-            # The dataset_type is already set to 'SDSD' above
-            
         if not run_command(train_cmd, logger):
             logger.error(f"Training failed for {dataset_name}. Skipping to next dataset.")
             continue
@@ -170,12 +149,6 @@ def main():
             '--save', eval_save_dir
         ]
         
-        # Add SDSD-specific arguments for evaluation too
-        if dataset_name in ['SDSD-indoor', 'SDSD-outdoor']:
-            subdataset = dataset_name.split('-')[1]  # 'indoor' or 'outdoor'
-            # Instead of passing sdsd_subset, we'll handle this in the dataloader
-            # The dataset_type is already set to 'SDSD' above
-            
         if not run_command(eval_cmd, logger):
             logger.error(f"Evaluation failed for {dataset_name}. Skipping to next dataset.")
             continue
