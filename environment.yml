@@ -54,6 +54,7 @@ dependencies:
       - jsonargparse
       - kaleido
       - kiwisolver
+      - scikit-image
       - lightning
       - lightning-utilities
       - loguru
