@@ -11,7 +11,6 @@ import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 from model.model import *
 from dataloader.create_data import CreateDataset
-import torch.optim as optim
 
 parser = argparse.ArgumentParser("ZERO-TIG")
 parser.add_argument('--batch_size', type=int, default=1, help='batch size')
@@ -19,16 +18,14 @@ parser.add_argument('--cuda', default=True, type=bool, help='Use CUDA to train m
 parser.add_argument('--gpu', type=str, default='0', help='gpu device id')
 parser.add_argument('--seed', type=int, default=2, help='random seed')
 parser.add_argument('--epochs', type=int, default=5, help='epochs')
-parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
-parser.add_argument('--save', type=str, default='EXP/', help='location to save models')
-parser.add_argument('--model_pretrain', type=str, default='weights/BVI-RLV.pt', help='pretrained model')
-parser.add_argument('--lowlight_images_path', type=str, default='../data/BVI-RLV/input',
-                    help='path for train data')
-parser.add_argument('--dpflow_model', type=str, default='dpflow', help='dpflow model')
-parser.add_argument('--of_scale', type=int, default=3)
-parser.add_argument('--dataset', type=str, default='BVI-RLV', help='dataset')
-parser.add_argument('--num_workers', type=int, default=0)
-parser.add_argument('--accumulation_steps', type=int, default=4, help='gradient accumulation steps')
+parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
+parser.add_argument('--save', type=str, default='./EXP/', help='location of the data corpus')
+parser.add_argument('--model_pretrain', type=str, help='location of the data corpus')
+parser.add_argument('--lowlight_images_path', type=str,default='',help='input data folder')
+parser.add_argument('--dpflow_model', type=str, default='dpflow', help='DPFlow model name for optical flow')
+parser.add_argument('--of_scale', type=int, default=3, help='downscale size when compute OF')
+parser.add_argument('--dataset', type=str, default='RLV', help='Specified data set')
+parser.add_argument('--num_workers', type=int, default=0, help='number of dataloader workers')
 
 args = parser.parse_args()
 
@@ -99,8 +96,7 @@ def main():
         logging.info('Model is initialized without pre-trained model.')
 
     model = model.cuda()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999))
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[30, 80], gamma=0.5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=3e-4)
     MB = utils.count_parameters_in_MB(model)
     logging.info("model size = %f", MB)
 
@@ -117,37 +113,29 @@ def main():
         TestDataset, batch_size=1,
         pin_memory=True, num_workers=args.num_workers, shuffle=False, generator=torch.Generator(device='cuda'))
 
-    start_epoch = 0
-    if args.model_pretrain:
-        # ... (model loading remains the same)
+    total_step = 0
+    model.train()
+    for epoch in range(args.epochs):
+        losses = []
+        for idx, (input, img_name, img_path, last_img_path) in enumerate(train_queue):
+            model.is_new_seq = utils.sequential_judgment(img_path[0], last_img_path[0])
+            if model.is_new_seq:
+                print("Get this img from: ", img_path, "\n Last img from: ", last_img_path)
 
-    for epoch in range(start_epoch, args.epochs):
-        logging.info("train-epoch %03d" % epoch)
-        model.train()
-        optimizer.zero_grad()
-        
-        for i, (input) in enumerate(train_queue):
-            if args.cuda:
-                input = [x.cuda() if isinstance(x, torch.Tensor) else x for x in input]
-            
-            loss = model._loss(input) / args.accumulation_steps
+            total_step += 1
+            input = Variable(input, requires_grad=False).cuda()
+            optimizer.zero_grad()
+            optimizer.param_groups[0]['capturable'] = True
+            loss = model._loss(input)
             loss.backward()
-            
-            if (i + 1) % args.accumulation_steps == 0:
-                optimizer.step()
-                optimizer.zero_grad()
-        
-        scheduler.step()
+            nn.utils.clip_grad_norm_(model.parameters(), 5)
+            optimizer.step()
+            losses.append(loss.item())
+            logging.info('train-epoch %03d %03d %f', epoch, idx, loss)
+        logging.info('train-epoch %03d %f', epoch, np.average(losses))
+        utils.save(model, os.path.join(model_path, 'weights_%d.pt' % epoch))
 
-        # Save the model
-        if not os.path.exists(os.path.join(args.save, 'model_epochs')):
-            os.makedirs(os.path.join(args.save, 'model_epochs'))
-
-        save_path = os.path.join(args.save, 'model_epochs', 'weights_%d.pt' % epoch)
-        torch.save(model.state_dict(), save_path)
-        logging.info(f"Saved model to {save_path}")
-
-        if epoch % 1 == 0 and i != 0:
+        if epoch % 1 == 0 and total_step != 0:
             model.eval()
             with torch.no_grad():
                 for idx, (input, img_name, img_path, last_img_path) in enumerate(test_queue):
