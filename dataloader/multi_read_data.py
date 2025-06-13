@@ -267,8 +267,9 @@ class SDSDDataloader(BaseDataset):
         
         print(f"SDSD phase_list for {subset}:", phase_list[:5])  # Print first 5 entries
         
-        # SDSD structure: 3_SDSD/indoor/ or 3_SDSD/outdoor/
-        subset_dir = os.path.join(dir, subset)
+        # SDSD structure: 3_SDSD/indoor/indoor_png/ or 3_SDSD/outdoor/outdoor_png/
+        subset_png_dir_name = f"{subset}_png"
+        subset_dir = os.path.join(dir, subset, subset_png_dir_name)
         print(f"Looking in subset directory: {subset_dir}")
         
         if not os.path.exists(subset_dir):
