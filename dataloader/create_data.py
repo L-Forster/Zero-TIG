@@ -2,12 +2,14 @@ from .multi_read_data import *
 
 def CreateDataset(args, task):
     dataset = None
-    if 'dataset' not in args:
-        dataset = DefaultDataset()
-    elif 'RLV' == args.dataset:
+    dataset_name = args.dataset
+
+    if dataset_name in ['lowlight_dataset', 'RLV', 'BVI-RLV']:
         dataset = RLVDataLoader()
-    elif 'DID' == args.dataset:
+    elif dataset_name in ['DID', 'DID_1080']:
         dataset = DidDataloader()
+    elif dataset_name in ['SDSD', '3_SDSD']:
+        dataset = SDSDDataloader()
     else:
         dataset = DefaultDataset()
 
