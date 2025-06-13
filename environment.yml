@@ -27,6 +27,7 @@ dependencies:
       # This gives pip the flexibility to find versions compatible
       # with the Python 3.12 and PyTorch 2.3.1 ecosystem.
       - absl-py
+      - lpips
       - aiohappyeyeballs
       - aiohttp
       - aiosignal
