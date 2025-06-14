@@ -280,7 +280,6 @@ class SDSDDataloader(BaseDataset):
             pair_dir_name = line.strip()
             if not pair_dir_name:
                 continue
-            
             # Construct path to the pair directory
             current_pair_dir = os.path.join(subset_dir, pair_dir_name)
             
@@ -295,6 +294,7 @@ class SDSDDataloader(BaseDataset):
                     if 'gt' not in f.lower() and 'normal' not in f.lower():
                         low_light_file = f
                         break  # Take the first non-GT image
+                
                 
                 if low_light_file:
                     img_list.append(low_light_file)
