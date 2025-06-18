@@ -7,6 +7,19 @@ import subprocess
 import pandas as pd
 import json
 
+def get_dataset_type(dataset_dir_name):
+    """Map directory names to dataset types expected by the scripts"""
+    mapping = {
+        'lowlight_dataset': 'lowlight_dataset',  # Use lowlight_dataset as the dataset type
+        'RLV': 'RLV',
+        'BVI-RLV': 'RLV', 
+        'DID_1080': 'DID',
+        'SDSD-indoor': 'SDSD',  # Use SDSD loader for indoor
+        'SDSD-outdoor': 'SDSD',  # Use SDSD loader for outdoor
+        '3_SDSD': 'SDSD',  # Handle the actual SDSD directory name
+    }
+    return mapping.get(dataset_dir_name, dataset_dir_name)
+
 def setup_logging(log_file):
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
     # Remove existing handlers to avoid duplicate logs
@@ -86,6 +99,7 @@ def main():
         
         # --- Paths specific to the current dataset ---
         dataset_dir = os.path.join(args.base_data_dir, dataset_name)
+            
         current_test_list = os.path.join(dataset_dir, 'test_list.txt')
         current_gt_dir = os.path.join(dataset_dir, 'gt')
 
@@ -95,15 +109,19 @@ def main():
 
         # --- 1. TRAINING ---
         logger.info(f"--- Stage 1: Training on {dataset_name} ---")
+        dataset_type = get_dataset_type(dataset_name)
+        logger.info(f"Using dataset type: {dataset_type} for directory: {dataset_name}")
+        
         train_cmd = [
             'python', 'train.py',
-            '--dataset', dataset_name,
+            '--dataset', dataset_type,
             '--lowlight_images_path', dataset_dir,
             '--model_pretrain', pretrain_weights_path,
             '--save', train_base_dir,
             '--epochs', str(args.epochs),
             '--num_workers', str(args.num_workers)
         ]
+        
         if not run_command(train_cmd, logger):
             logger.error(f"Training failed for {dataset_name}. Skipping to next dataset.")
             continue
@@ -125,11 +143,12 @@ def main():
         logger.info(f"--- Stage 2: Evaluating predictions for {dataset_name} ---")
         eval_cmd = [
             'python', 'evals.py',
-            '--dataset', dataset_name,
+            '--dataset', dataset_type,
             '--lowlight_images_path', dataset_dir,
             '--model_pretrain', final_weights_path,
             '--save', eval_save_dir
         ]
+        
         if not run_command(eval_cmd, logger):
             logger.error(f"Evaluation failed for {dataset_name}. Skipping to next dataset.")
             continue

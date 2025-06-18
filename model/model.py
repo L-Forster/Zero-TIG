@@ -148,10 +148,8 @@ class Network(nn.Module):
         self.of_scale = args.of_scale
 
     def load_raft(self, args):
-        raft = torch.nn.DataParallel(RAFT(args))
-        # load pre-trained data
-        raft.load_state_dict(torch.load(args.raft_model))
-        raft = raft.module
+        # Load RAFT model
+        raft = RAFT(args)
         raft.eval()
         for param in raft.parameters():
             param.requires_grad = False
@@ -284,8 +282,14 @@ class Network(nn.Module):
         L2_tmp = L2_tmp.to(torch.float32) #/ 255.0
 
         # 2. OF last->this
-        # last_H3_tmp, L2_tmp = self.padder.pad(last_H3_tmp, L2_tmp) # [640, 360]
-        _, flow_up = self.raft(last_H3_tmp, L2_tmp, iters=20, test_mode=True)
+        # Ensure RAFT model is on the same device as the inputs
+        self.raft = self.raft.to(L2.device)
+        self.raft.eval()  # Ensure model is in eval mode
+        
+        # Use RAFT forward method
+        with torch.no_grad():
+            # RAFT expects [B, C, H, W] format for each image
+            _, flow_up = self.raft(last_H3_tmp, L2_tmp, iters=12, test_mode=True)
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
@@ -341,10 +345,8 @@ class Finetunemodel(nn.Module):
 
 
     def load_raft(self, args):
-        raft = torch.nn.DataParallel(RAFT(args))
-        # load pre-trained data
-        raft.load_state_dict(torch.load(args.raft_model))
-        raft = raft.module
+        # Load RAFT model
+        raft = RAFT(args)
         raft.eval()
         for param in raft.parameters():
             param.requires_grad = False
@@ -417,8 +419,14 @@ class Finetunemodel(nn.Module):
         L2_tmp = L2_tmp.to(torch.float32)  # / 255.0
 
         # 2. OF last->this
-        # last_H3_tmp, L2_tmp = self.padder.pad(last_H3_tmp, L2_tmp) # [640, 360]
-        _, flow_up = self.raft(last_H3_tmp, L2_tmp, iters=20, test_mode=True)
+        # Ensure RAFT model is on the same device as the inputs
+        self.raft = self.raft.to(L2.device)
+        self.raft.eval()  # Ensure model is in eval mode
+        
+        # Use RAFT forward method
+        with torch.no_grad():
+            # RAFT expects [B, C, H, W] format for each image
+            _, flow_up = self.raft(last_H3_tmp, L2_tmp, iters=12, test_mode=True)
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
