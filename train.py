@@ -85,15 +85,25 @@ def main():
     model.enhance.out_conv.apply(model.enhance_weights_init)
 
     try:
-        base_weights = torch.load(args.model_pretrain)
+        base_weights = torch.load(args.model_pretrain, map_location='cuda:0')
         pretrained_dict = base_weights
+
+        new_pretrained_dict = {}
+        for k, v in pretrained_dict.items():
+            if k.startswith('denoise_1.') or k.startswith('denoise_2.'):
+                new_k = k.replace('.', '.model.', 1)
+                new_pretrained_dict[new_k] = v
+            else:
+                new_pretrained_dict[k] = v
+        pretrained_dict = new_pretrained_dict
+
         model_dict = model.state_dict()
         pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
         model_dict.update(pretrained_dict)
         model.load_state_dict(model_dict)
         logging.info('Loaded pre-trained model from %s.' % args.model_pretrain)
-    except:
-        logging.info('Model is initialized without pre-trained model.')
+    except Exception as e:
+        logging.info('Model is initialized without pre-trained model: %s', e)
 
     model = model.cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=3e-4)
@@ -143,7 +153,7 @@ def main():
                     if model.is_new_seq:
                         print("Eval Get this img from: ", img_path, "\n Last img from: ", last_img_path)
                     input = Variable(input, volatile=True).cuda()
-                    L_pred1,L_pred2,L2,s2,s21,s22,H2,H11,H12,H13,s13,H14,s14,H3,s3,H3_pred,H4_pred,L_pred1_L_pred2_diff,H13_H14_diff,H2_blur,H3_blur,H3_denoised1,H3_denoised2= model(input)
+                    L_pred1,L_pred2,L2,s2,s21,s22,H2,H11,H12,H13,s13,H14,s14,H3,s3,H3_pred,H4_pred,L_pred1_L_pred2_diff,H3_denoised1_H3_denoised2_diff,H2_blur,H3_blur,H3_denoised1,H3_denoised2= model(input)
                     input_name = '%s_%s' % (os.path.basename(os.path.split(img_path[0])[0]), img_name[0])
                     H3_img = save_images(H3)
                     H2_img = save_images(H2)
