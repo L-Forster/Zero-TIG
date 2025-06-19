@@ -37,6 +37,7 @@ parser.add_argument('--seed', type=int, default=2, help='random seed')
 parser.add_argument('--of_scale', type=int, default=3, help='downscale size when compute OF')
 parser.add_argument('--dataset', type=str, default='RLV', help='Specified data set')
 parser.add_argument('--gain', type=int, default=100, help='OF loss gain')
+parser.add_argument('--name', type=str, default='run', help='A name for the evaluation run, used for log and metric file names.')
 
 
 args = parser.parse_args()
@@ -46,7 +47,7 @@ os.makedirs(save_path, exist_ok=True)
 log_format = '%(asctime)s %(message)s'
 logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                     format=log_format, datefmt='%m/%d %I:%M:%S %p')
-mertic = logging.FileHandler(os.path.join(args.save, 'log.txt'))
+mertic = logging.FileHandler(os.path.join(args.save, f'{args.name}.log'))
 mertic.setFormatter(logging.Formatter(log_format))
 logging.getLogger().addHandler(mertic)
 
@@ -181,7 +182,7 @@ def main():
                     cv2.imwrite(os.path.join(save_dir, input_name+'_denoise_hm.png'), save_img)
 
     torch.set_grad_enabled(True)
-    with open(os.path.join(args.save, 'Metrics.json'), 'w') as file:
+    with open(os.path.join(args.save, f'{args.name}_Metrics.json'), 'w') as file:
         json.dump({
                    'Total_PSNR': total_psnr/num_img,
                    'Total_SSIM': total_ssim/num_img,
