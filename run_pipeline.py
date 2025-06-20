@@ -6,6 +6,7 @@ import argparse
 import subprocess
 import pandas as pd
 import json
+import time
 
 def get_dataset_type(dataset_dir_name):
     """Map directory names to dataset types expected by the scripts"""
@@ -37,6 +38,16 @@ def find_latest_run_dir(base_dir):
     if not list_of_dirs:
         return None
     return max(list_of_dirs, key=os.path.getctime)
+
+def find_latest_weights_file(model_epochs_dir):
+    """Finds the most recent weights file in the model_epochs directory."""
+    weights_files = glob.glob(os.path.join(model_epochs_dir, 'weights_*.pt'))
+    if not weights_files:
+        return None
+    
+    # Extract epoch number from filename and find the max
+    latest_file = max(weights_files, key=lambda f: int(os.path.basename(f).split('_')[1].split('.')[0]))
+    return latest_file
 
 def run_command(command, logger):
     """Executes a command and logs its output."""
@@ -76,6 +87,8 @@ def main():
                         help="Number of workers for data loading.")
     parser.add_argument('--epochs', type=int, default=5,
                         help="Number of epochs for fine-tuning.")
+    parser.add_argument('--eval_name', type=str, default='run',
+                        help="Name for the evaluation run, used for log and metric file names.")
     
     args = parser.parse_args()
 
@@ -83,6 +96,7 @@ def main():
     logger = setup_logging(os.path.join(args.base_exp_dir, 'pipeline_log.txt'))
 
     logger.info(f"Starting pipeline with arguments: {args}")
+    start_time = time.time()
 
     for dataset_name in args.datasets:
         logger.info(f"========== PROCESSING DATASET: {dataset_name} ==========")
@@ -132,9 +146,11 @@ def main():
             logger.error(f"Could not find training output directory in {train_base_dir}. Skipping.")
             continue
         
-        final_weights_path = os.path.join(train_run_dir, 'model_epochs', f'weights_{args.epochs-1}.pt')
-        if not os.path.exists(final_weights_path):
-            logger.error(f"Final weights file not found at {final_weights_path}. Skipping.")
+        model_epochs_dir = os.path.join(train_run_dir, 'model_epochs')
+        final_weights_path = find_latest_weights_file(model_epochs_dir)
+
+        if not final_weights_path:
+            logger.error(f"No weights file found in {model_epochs_dir}. Skipping.")
             continue
             
         logger.info(f"Training complete. Using final weights: {final_weights_path}")
@@ -146,7 +162,8 @@ def main():
             '--dataset', dataset_type,
             '--lowlight_images_path', dataset_dir,
             '--model_pretrain', final_weights_path,
-            '--save', eval_save_dir
+            '--save', eval_save_dir,
+            '--name', args.eval_name
         ]
         
         if not run_command(eval_cmd, logger):
@@ -156,7 +173,7 @@ def main():
         logger.info(f"Evaluation complete. Reports saved in: {eval_save_dir}")
 
         # --- 3. LOG FINAL RESULTS ---
-        summary_json_path = os.path.join(eval_save_dir, 'Metrics.json')
+        summary_json_path = os.path.join(eval_save_dir, f'{args.eval_name}_Metrics.json')
         if os.path.exists(summary_json_path):
             with open(summary_json_path, 'r') as f:
                 metrics = json.load(f)
@@ -169,6 +186,10 @@ def main():
         logger.info(f"========== FINISHED DATASET: {dataset_name} ==========\n")
 
     logger.info("Pipeline has completed for all datasets.")
+
+    end_time = time.time()
+    total_time_seconds = end_time - start_time
+    logger.info(f"Total execution time: {time.strftime('%H:%M:%S', time.gmtime(total_time_seconds))}")
 
 if __name__ == '__main__':
     main()
