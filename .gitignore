@@ -1,0 +1,14 @@
+build/
+evaluation_ordered_per_epoch/
+evaluation_results/
+EXP/
+final_predictions/
+flow_comparison/
+lowlight_dataset/
+PIPELINE_EXP/
+results/
+vmaf/
+__pycache__/
+dataloader/__pycache__/
+lightning_logs/
+finetune_of_noise/MPI-Sintel-complete/

@@ -1,0 +1,3 @@
+# Point to the MPI Sintel dataset directory provided.
+# Key must be 'sintel' to match PTLFlow dataset name.
+sintel: ./MPI-Sintel-complete/ 

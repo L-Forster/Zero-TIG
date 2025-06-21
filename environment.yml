@@ -1,0 +1,107 @@
+name: ptlflow
+channels:
+  - pytorch
+  - conda-forge
+
+dependencies:
+  # 1. Your requirement for Python 3.12 is now set.
+  - python=3.12
+
+  # 2. Core utilities managed by Conda.
+  - pip
+  - openssl
+
+  # 3. The pip installer will handle all Python packages below.
+  - pip:
+      # --- IMPORTANT: Point to the PyTorch repository for CUDA 12.1 ---
+      # This is the key change that enables Python 3.12 support.
+      - --extra-index-url https://download.pytorch.org/whl/cu121
+
+      # --- Pin the modern PyTorch stack compatible with Python 3.12 ---
+      # Using the latest stable versions is recommended.
+      - torch==2.3.1
+      - torchvision==0.18.1
+      - torchaudio==2.3.1
+
+      # --- List all other packages without version pins ---
+      # This gives pip the flexibility to find versions compatible
+      # with the Python 3.12 and PyTorch 2.3.1 ecosystem.
+      - absl-py
+      - lpips
+      - aiohappyeyeballs
+      - aiohttp
+      - aiosignal
+      - antlr4-python3-runtime
+      - attrs
+      - bitsandbytes
+      - certifi
+      - charset-normalizer
+      - contourpy
+      - cycler
+      - docstring-parser
+      - einops
+      - filelock
+      - fonttools
+      - frozenlist
+      - fsspec
+      - grpcio
+      - h5py
+      - hf-xet
+      - huggingface-hub
+      - hydra-core
+      - idna
+      - importlib-resources
+      - jinja2
+      - jsonargparse
+      - kaleido
+      - kiwisolver
+      - scikit-image
+      - lightning
+      - lightning-utilities
+      - loguru
+      - markdown
+      - markdown-it-py
+      - markupsafe
+      - matplotlib
+      - mdurl
+      - mpmath
+      - multidict
+      - networkx
+      - numpy
+      - omegaconf
+      - opencv-python
+      - packaging
+      - pandas
+      - pillow
+      - plotly
+      - propcache
+      - protobuf
+      - ptlflow
+      - pygments
+      - pyparsing
+      - pypng
+      - python-dateutil
+      - pytorch-lightning
+      - pytz
+      - pyyaml
+      - requests
+      - rich
+      - safetensors
+      - scipy
+      - six
+      - sympy
+      - tabulate
+      - tenacity
+      - tensorboard
+      - tensorboard-data-server
+      - tensorboardx
+      - timm
+      - torchmetrics
+      - tqdm
+      - triton
+      - typeshed-client
+      - typing-extensions
+      - tzdata
+      - urllib3
+      - werkzeug
+      - yarl
