@@ -93,6 +93,8 @@ def main():
                         help="Path to a custom optical flow model checkpoint.")
     parser.add_argument('--of_model_name', type=str, default='dpflow',
                         help="Name of the optical flow model to use (e.g., 'raft', 'dpflow').")
+    parser.add_argument('--disable_self_ensemble', action='store_true',
+                        help="If set, disables the self-ensemble module in the model.")
     
     args = parser.parse_args()
 
@@ -139,6 +141,11 @@ def main():
             '--epochs', str(args.epochs),
             '--num_workers', str(args.num_workers)
         ]
+        if not args.disable_self_ensemble:
+            train_cmd.extend(['--use_self_ensemble', 'True'])
+        else:
+            train_cmd.extend(['--use_self_ensemble', 'False'])
+        
         if args.of_model_path:
             train_cmd.extend(['--of_model_name', args.of_model_name])
             train_cmd.extend(['--of_model_path', args.of_model_path])
@@ -172,6 +179,11 @@ def main():
             '--save', eval_save_dir,
             '--name', args.eval_name
         ]
+        if not args.disable_self_ensemble:
+            eval_cmd.extend(['--use_self_ensemble', 'True'])
+        else:
+            eval_cmd.extend(['--use_self_ensemble', 'False'])
+        
         if args.of_model_path:
             eval_cmd.extend(['--of_model_name', args.of_model_name])
             eval_cmd.extend(['--of_model_path', args.of_model_path])

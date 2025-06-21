@@ -129,8 +129,15 @@ class Network(nn.Module):
         super(Network, self).__init__()
 
         self.enhance = Enhancer(layers=3, channels=64)
-        self.denoise_1 = SelfEnsemble(Denoise_1(chan_embed=48))
-        self.denoise_2 = SelfEnsemble(Denoise_2(chan_embed=48))
+        
+        use_ensemble = getattr(args, 'use_self_ensemble', True)
+        if use_ensemble:
+            self.denoise_1 = SelfEnsemble(Denoise_1(chan_embed=48))
+            self.denoise_2 = SelfEnsemble(Denoise_2(chan_embed=48))
+        else:
+            self.denoise_1 = Denoise_1(chan_embed=48)
+            self.denoise_2 = Denoise_2(chan_embed=48)
+            
         self._l2_loss = nn.MSELoss()
         self._l1_loss = nn.L1Loss()
         self.is_WB = True if 'underwater' == args.dataset else False
@@ -321,8 +328,15 @@ class Finetunemodel(nn.Module):
     def __init__(self, args):
         super(Finetunemodel, self).__init__()
         self.args = args
-        self.denoise_1 = Denoise_1(chan_embed=48)
-        self.denoise_2 = Denoise_2(chan_embed=48)
+
+        use_ensemble = getattr(args, 'use_self_ensemble', True)
+        if use_ensemble:
+            self.denoise_1 = SelfEnsemble(Denoise_1(chan_embed=48))
+            self.denoise_2 = SelfEnsemble(Denoise_2(chan_embed=48))
+        else:
+            self.denoise_1 = Denoise_1(chan_embed=48)
+            self.denoise_2 = Denoise_2(chan_embed=48)
+
         self.enhance = Enhancer(layers=3, channels=64)
         base_weights = torch.load(args.model_pretrain, map_location='cuda:0')
         pretrained_dict = base_weights

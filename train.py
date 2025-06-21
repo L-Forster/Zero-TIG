@@ -27,6 +27,7 @@ parser.add_argument('--dataset', type=str, default='RLV', help='Specified data s
 parser.add_argument('--num_workers', type=int, default=0, help='number of dataloader workers')
 parser.add_argument('--of_model_path', type=str, default=None, help='Path to the optical flow model checkpoint.')
 parser.add_argument('--of_model_name', type=str, default='raft', help='Name of the optical flow model to use.')
+parser.add_argument('--use_self_ensemble', type=lambda x: (str(x).lower() == 'true'), default=True, help='Use self-ensemble module in the model.')
 
 args = parser.parse_args()
 
