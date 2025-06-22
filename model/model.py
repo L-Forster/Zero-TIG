@@ -130,8 +130,8 @@ class Network(nn.Module):
 
         self.enhance = Enhancer(layers=3, channels=64)
         
-        use_ensemble = getattr(args, 'use_self_ensemble', True)
-        if use_ensemble:
+        self.use_ensemble = getattr(args, 'use_self_ensemble', True)
+        if self.use_ensemble:
             self.denoise_1 = SelfEnsemble(Denoise_1(chan_embed=48))
             self.denoise_2 = SelfEnsemble(Denoise_2(chan_embed=48))
         else:
@@ -235,22 +235,31 @@ class Network(nn.Module):
         H12 = torch.clamp(H12, eps, 1)
 
         denoise2_input_1 = torch.cat([self.last_H31_wp, self.last_s31_wp, H11, s21], 1)
-        denoise2_subtract_input_1 = torch.cat([H11, s21], 1).detach()
-        H3_pred = self.denoise_2(denoise2_input_1, denoise2_subtract_input_1)
+        if self.use_ensemble:
+            denoise2_subtract_input_1 = torch.cat([H11, s21], 1).detach()
+            H3_pred = self.denoise_2(denoise2_input_1, denoise2_subtract_input_1)
+        else:
+            H3_pred = self.denoise_2(denoise2_input_1)
         H3_pred = torch.clamp(H3_pred, eps, 1)
         H13 = H3_pred[:, :3, :, :]
         s13 = H3_pred[:, 3:, :, :]
 
         denoise2_input_2 = torch.cat([self.last_H32_wp, self.last_s32_wp, H12, s22], 1)
-        denoise2_subtract_input_2 = torch.cat([H12, s22], 1).detach()
-        H4_pred = self.denoise_2(denoise2_input_2, denoise2_subtract_input_2)
+        if self.use_ensemble:
+            denoise2_subtract_input_2 = torch.cat([H12, s22], 1).detach()
+            H4_pred = self.denoise_2(denoise2_input_2, denoise2_subtract_input_2)
+        else:
+            H4_pred = self.denoise_2(denoise2_input_2)
         H4_pred = torch.clamp(H4_pred, eps, 1)
         H14 = H4_pred[:, :3, :, :]
         s14 = H4_pred[:, 3:, :, :]
 
         denoise2_input_3 = torch.cat([self.last_H3_wp, self.last_s3_wp, H2, s2], 1)
-        denoise2_subtract_input_3 = torch.cat([H2, s2], 1).detach()
-        H5_pred = self.denoise_2(denoise2_input_3, denoise2_subtract_input_3)
+        if self.use_ensemble:
+            denoise2_subtract_input_3 = torch.cat([H2, s2], 1).detach()
+            H5_pred = self.denoise_2(denoise2_input_3, denoise2_subtract_input_3)
+        else:
+            H5_pred = self.denoise_2(denoise2_input_3)
         H5_pred = torch.clamp(H5_pred, eps, 1)
         H3 = H5_pred[:, :3, :, :]
         s3 = H5_pred[:, 3:, :, :]
@@ -329,8 +338,8 @@ class Finetunemodel(nn.Module):
         super(Finetunemodel, self).__init__()
         self.args = args
 
-        use_ensemble = getattr(args, 'use_self_ensemble', True)
-        if use_ensemble:
+        self.use_ensemble = getattr(args, 'use_self_ensemble', True)
+        if self.use_ensemble:
             self.denoise_1 = SelfEnsemble(Denoise_1(chan_embed=48))
             self.denoise_2 = SelfEnsemble(Denoise_2(chan_embed=48))
         else:
@@ -409,8 +418,11 @@ class Finetunemodel(nn.Module):
             self.last_s3_wp = H2.detach()
 
         denoise2_input = torch.cat([self.last_H3_wp, self.last_s3_wp, H2, s2], 1)
-        denoise2_subtract_input = torch.cat([H2, s2], 1).detach()
-        H5_pred = self.denoise_2(denoise2_input, denoise2_subtract_input)
+        if self.use_ensemble:
+            denoise2_subtract_input = torch.cat([H2, s2], 1).detach()
+            H5_pred = self.denoise_2(denoise2_input, denoise2_subtract_input)
+        else:
+            H5_pred = self.denoise_2(denoise2_input)
         H5_pred = torch.clamp(H5_pred, eps, 1)
         H3 = H5_pred[:, :3, :, :]
         s3 = H5_pred[:, 3:, :, :]
