@@ -32,9 +32,20 @@ def load_raft_model(checkpoint_path):
     model.eval()
     return model
 
-def load_dpflow_model():
-    """Load DPFlow model using ptlflow."""
-    model = ptlflow.get_model('dpflow')
+def load_dpflow_model(checkpoint_path=None):
+    """Load DPFlow model using ptlflow, with optional custom weights."""
+    if checkpoint_path:
+        print(f"Loading custom DPFlow weights from: {checkpoint_path}")
+        # Get the model architecture without loading any pretrained weights first
+        model = ptlflow.get_model('dpflow', ckpt_path=None)
+        # Our custom weights file is a clean state_dict, so we can load it directly.
+        custom_state_dict = torch.load(checkpoint_path, map_location=torch.device(DEVICE))
+        model.load_state_dict(custom_state_dict)
+    else:
+        print("Loading default 'things' pretrained DPFlow model.")
+        # 'things' is the ptlflow keyword for the default pretrained weights.
+        model = ptlflow.get_model('dpflow', ckpt_path='things')
+
     model.to(DEVICE)
     model.eval()
     return model
@@ -128,11 +139,11 @@ def main():
                         help='Output directory for flow visualizations')
     parser.add_argument('--raft_weights', type=str, default='./weights/raft-sintel.pth',
                         help='Path to RAFT model weights')
-    parser.add_argument('--models', type=str, nargs='+', default=['raft', 'dpflow', 'none'],
-                        choices=['raft', 'dpflow', 'none'],
+    parser.add_argument('--dpflow_finetuned_weights', type=str, default=None,
+                        help='Path to your fine-tuned DPFlow model weights')
+    parser.add_argument('--models', type=str, nargs='+', default=['raft', 'dpflow', 'dpflow_finetuned'],
+                        choices=['raft', 'dpflow', 'dpflow_finetuned', 'none'],
                         help='Models to compare')
-    parser.add_argument('--viz_mode', type=str, default='warp', choices=['flow', 'warp'], 
-                        help='Visualization mode: flow heatmap or warped image')
     
     args = parser.parse_args()
     
@@ -150,8 +161,15 @@ def main():
         models['raft'] = load_raft_model(args.raft_weights)
     
     if 'dpflow' in args.models:
-        print("Loading DPFlow model...")
+        print("Loading base DPFlow model...")
         models['dpflow'] = load_dpflow_model()
+
+    if 'dpflow_finetuned' in args.models:
+        if args.dpflow_finetuned_weights is None:
+            print("ERROR: --dpflow_finetuned_weights must be provided to compare the fine-tuned model.")
+            return
+        print("Loading fine-tuned DPFlow model...")
+        models['dpflow_finetuned'] = load_dpflow_model(args.dpflow_finetuned_weights)
     
     # Find image pairs
     image_files = sorted(glob.glob(os.path.join(args.input_dir, '*.png')) + 
@@ -172,26 +190,28 @@ def main():
         
         # Compute flow for each model
         for model_name in args.models:
-            output_path = os.path.join(args.output_dir, model_name, 
-                                     f"flow_{img1_name}_to_{img2_name}.png")
+            # Generate a base path for the outputs
+            output_base_path = os.path.join(args.output_dir, model_name, 
+                                     f"flow_{img1_name}_to_{img2_name}")
             
             if model_name == 'raft':
                 flow = compute_flow_raft(models['raft'], img1_path, img2_path)
-            elif model_name == 'dpflow':
-                flow = compute_flow_dpflow(models['dpflow'], img1_path, img2_path)
+            elif model_name in ['dpflow', 'dpflow_finetuned']:
+                flow = compute_flow_dpflow(models[model_name], img1_path, img2_path)
             elif model_name == 'none':
                 # To get the shape, we need to load the image.
                 h, w, _ = np.array(Image.open(img1_path)).shape
                 flow = create_zero_flow((1, 3, h, w))
             
-            if args.viz_mode == 'flow':
-                save_flow_visualization(flow, output_path)
-            elif args.viz_mode == 'warp':
-                # For warping, we need to load the second image again
-                image2_for_warp = torch.from_numpy(np.array(Image.open(img2_path)).astype(np.uint8)).permute(2, 0, 1).float()[None].to(DEVICE)
-                save_warped_image(image2_for_warp, flow, output_path)
+            # Save both visualization types
+            output_path_flow = f"{output_base_path}_flow.png"
+            save_flow_visualization(flow, output_path_flow)
 
-            print(f"  Saved {model_name} flow to {output_path}")
+            output_path_warp = f"{output_base_path}_warp.png"
+            image2_for_warp = torch.from_numpy(np.array(Image.open(img2_path)).astype(np.uint8)).permute(2, 0, 1).float()[None].to(DEVICE)
+            save_warped_image(image2_for_warp, flow, output_path_warp)
+
+            print(f"  Saved {model_name} outputs to {output_base_path}_<flow|warp>.png")
     
     print(f"\nComparison complete! Check results in {args.output_dir}")
 

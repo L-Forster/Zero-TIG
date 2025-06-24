@@ -19,7 +19,7 @@ import types
 from typing import Dict, Any, Optional
 
 from loguru import logger
-from lightning.pytorch.callbacks import Callback
+from lightning.pytorch.callbacks import Callback, EarlyStopping
 
 from noise import generate_noise, reshape_noise_params
 from ptlflow.data.flow_datamodule import FlowDataModule
@@ -41,27 +41,27 @@ class PrintLossCallback(Callback):
 
 class SaveWeightsOnlyCallback(Callback):
     """A callback to save only the model weights at the end of training."""
+    def __init__(self, training_args: Dict[str, Any]):
+        super().__init__()
+        self.training_args = training_args
+
     def on_train_end(self, trainer, pl_module):
         """Called when the train ends."""
         output_dir = "finetune_of_noise/weights"
         os.makedirs(output_dir, exist_ok=True)
         
-        model_name = trainer.model.hparams.model
-        dataset_name = trainer.datamodule.hparams.train_dataset
+        model_name = self.training_args["model"]
+        dataset_name = self.training_args["train_dataset"]
         output_filename = f"{model_name}-{dataset_name}-noisy.pth"
         output_path = os.path.join(output_dir, output_filename)
 
         logger.info(f"Training finished. Saving final model weights to {output_path}")
 
+        # The pl_module.state_dict() contains exactly the model's weights.
+        # No filtering or prefix manipulation is needed.
         state_dict = pl_module.state_dict()
-        new_state_dict = {}
-        for k, v in state_dict.items():
-            if k.startswith('model.'):
-                new_state_dict[k.replace('model.', '', 1)] = v
-            else:
-                new_state_dict[k] = v
         
-        torch.save(new_state_dict, output_path)
+        torch.save(state_dict, output_path)
         logger.info(f"Successfully saved weights to {output_path}")
 
 
@@ -196,7 +196,7 @@ def main():
         "noise_probability": 0.5,
         "train_batch_size": 1,
         "lr": 1e-5,
-        "max_epochs": 20,
+        "max_epochs": 50,
         "accelerator": "auto",
         "sintel_dstype": "final",
     }
@@ -244,10 +244,22 @@ def main():
 
     # --- 4. Trainer ---
     logger.info("Setting up trainer.")
+
+    early_stopping_callback = EarlyStopping(
+        monitor="val_sintel_clean_final/val/epe",
+        patience=3,
+        mode="min",
+        verbose=True,
+    )
+
     trainer = PTLFlowTrainer(
         accelerator=args["accelerator"],
         max_epochs=args["max_epochs"],
-        callbacks=[PrintLossCallback(), SaveWeightsOnlyCallback()],
+        callbacks=[
+            PrintLossCallback(), 
+            SaveWeightsOnlyCallback(args),
+            early_stopping_callback,
+        ],
         enable_checkpointing=False,
     )
 

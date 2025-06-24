@@ -93,8 +93,13 @@ def main():
         new_pretrained_dict = {}
         for k, v in pretrained_dict.items():
             if k.startswith('denoise_1.') or k.startswith('denoise_2.'):
-                new_k = k.replace('.', '.model.', 1)
-                new_pretrained_dict[new_k] = v
+                parts = k.split('.', 1)
+                if len(parts) == 2:
+                    new_k = f'{parts[0]}.model.{parts[1]}'
+                    new_pretrained_dict[new_k] = v
+                else:
+                    # Handle cases where the key might not have a dot
+                    new_pretrained_dict[k] = v
             else:
                 new_pretrained_dict[k] = v
         pretrained_dict = new_pretrained_dict
