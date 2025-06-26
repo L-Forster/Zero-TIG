@@ -26,7 +26,7 @@ def load_raft_model(checkpoint_path):
     args.alternate_corr = False
     
     model = torch.nn.DataParallel(RAFT(args))
-    model.load_state_dict(torch.load(checkpoint_path))
+    model.load_state_dict(torch.load(checkpoint_path, map_location=torch.device(DEVICE)))
     model = model.module
     model.to(DEVICE)
     model.eval()
