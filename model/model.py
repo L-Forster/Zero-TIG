@@ -143,8 +143,34 @@ class Network(nn.Module):
     def load_optical_flow_model(self, args, model_name='raft', model_path=None):
         """Loads an optical flow model."""
         if model_path:
-            # A specific checkpoint is provided, load it with ptlflow
-            model = ptlflow.get_model(model_name, ckpt_path=model_path)
+            # A specific checkpoint is provided.
+            # First, get the model architecture without any pretrained weights.
+            model = ptlflow.get_model(model_name, pretrained_on=None)
+            
+            # Then, load the checkpoint weights.
+            # This is more robust to different checkpoint formats.
+            ckpt = torch.load(model_path, map_location='cpu')
+            
+            # The checkpoint may be the state_dict directly, or it may be contained in a 'state_dict' or 'model' key.
+            if 'state_dict' in ckpt:
+                state_dict = ckpt['state_dict']
+            elif 'model' in ckpt:
+                state_dict = ckpt['model']
+            else:
+                state_dict = ckpt
+
+            # The state_dict may have keys with a 'module.' or other prefixes, which should be removed.
+            from collections import OrderedDict
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                name = k
+                if name.startswith('module.'):  # for DataParallel models
+                    name = name[7:]
+                if name.startswith('model.'):
+                    name = name[6:]
+                new_state_dict[name] = v
+            
+            model.load_state_dict(new_state_dict, strict=False)
         elif model_name.lower() == 'raft':
             # Default behavior: load the original RAFT model
             model = RAFT(args)
@@ -347,8 +373,34 @@ class Finetunemodel(nn.Module):
     def load_optical_flow_model(self, args, model_name='raft', model_path=None):
         """Loads an optical flow model."""
         if model_path:
-            # A specific checkpoint is provided, load it with ptlflow
-            model = ptlflow.get_model(model_name, ckpt_path=model_path)
+            # A specific checkpoint is provided.
+            # First, get the model architecture without any pretrained weights.
+            model = ptlflow.get_model(model_name, pretrained_on=None)
+            
+            # Then, load the checkpoint weights.
+            # This is more robust to different checkpoint formats.
+            ckpt = torch.load(model_path, map_location='cpu')
+            
+            # The checkpoint may be the state_dict directly, or it may be contained in a 'state_dict' or 'model' key.
+            if 'state_dict' in ckpt:
+                state_dict = ckpt['state_dict']
+            elif 'model' in ckpt:
+                state_dict = ckpt['model']
+            else:
+                state_dict = ckpt
+
+            # The state_dict may have keys with a 'module.' or other prefixes, which should be removed.
+            from collections import OrderedDict
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                name = k
+                if name.startswith('module.'):  # for DataParallel models
+                    name = name[7:]
+                if name.startswith('model.'):
+                    name = name[6:]
+                new_state_dict[name] = v
+            
+            model.load_state_dict(new_state_dict, strict=False)
         elif model_name.lower() == 'raft':
             # Default behavior: load the original RAFT model
             model = RAFT(args)
