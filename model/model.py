@@ -144,8 +144,8 @@ class Network(nn.Module):
         """Loads an optical flow model."""
         if model_path:
             # A specific checkpoint is provided.
-            # First, get the model architecture without any pretrained weights.
-            model = ptlflow.get_model(model_name, pretrained_on=None)
+            # First, get the model architecture.
+            model = ptlflow.get_model(model_name)
             
             # Then, load the checkpoint weights.
             # This is more robust to different checkpoint formats.
@@ -176,7 +176,7 @@ class Network(nn.Module):
             model = RAFT(args)
         else:
             # A different model name is given, but no path. Load pretrained from ptlflow.
-            model = ptlflow.get_model(model_name, pretrained_on='things')
+            model = ptlflow.get_model(model_name)
             
         model.eval()
         for param in model.parameters():
@@ -374,8 +374,8 @@ class Finetunemodel(nn.Module):
         """Loads an optical flow model."""
         if model_path:
             # A specific checkpoint is provided.
-            # First, get the model architecture without any pretrained weights.
-            model = ptlflow.get_model(model_name, pretrained_on=None)
+            # First, get the model architecture.
+            model = ptlflow.get_model(model_name)
             
             # Then, load the checkpoint weights.
             # This is more robust to different checkpoint formats.
@@ -406,7 +406,7 @@ class Finetunemodel(nn.Module):
             model = RAFT(args)
         else:
             # A different model name is given, but no path. Load pretrained from ptlflow.
-            model = ptlflow.get_model(model_name, pretrained_on='things')
+            model = ptlflow.get_model(model_name)
             
         model.eval()
         for param in model.parameters():
