@@ -317,7 +317,9 @@ class Network(nn.Module):
         # Use RAFT forward method
         with torch.no_grad():
             # RAFT expects [B, C, H, W] format for each image
-            _, flow_up = self.of_model(last_H3_tmp, L2_tmp, iters=12, test_mode=True)
+            # The ptlflow models have a unified forward signature.
+            outputs = self.of_model(last_H3_tmp, L2_tmp)
+            flow_up = outputs['flow_fw']
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
@@ -481,7 +483,9 @@ class Finetunemodel(nn.Module):
         # Use RAFT forward method
         with torch.no_grad():
             # RAFT expects [B, C, H, W] format for each image
-            _, flow_up = self.of_model(last_H3_tmp, L2_tmp, iters=12, test_mode=True)
+            # The ptlflow models have a unified forward signature.
+            outputs = self.of_model(last_H3_tmp, L2_tmp)
+            flow_up = outputs['flow_fw']
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
