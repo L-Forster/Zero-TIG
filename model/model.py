@@ -316,10 +316,16 @@ class Network(nn.Module):
         
         # Use RAFT forward method
         with torch.no_grad():
-            # RAFT expects [B, C, H, W] format for each image
-            # The ptlflow models have a unified forward signature.
-            outputs = self.of_model(last_H3_tmp, L2_tmp)
-            flow_up = outputs['flow_fw']
+            # Check if this is the local RAFT model or a ptlflow model
+            if hasattr(self.of_model, 'pad'):  # Local RAFT model has a 'pad' method
+                # Local RAFT expects two separate image tensors
+                _, flow_up = self.of_model(last_H3_tmp, L2_tmp, iters=12, test_mode=True)
+            else:
+                # ptlflow models expect a dictionary with stacked images
+                images_stacked = torch.stack([last_H3_tmp, L2_tmp], dim=1)  # [B, 2, C, H, W]
+                inputs_dict = {'images': images_stacked}
+                outputs = self.of_model(inputs_dict)
+                flow_up = outputs['flows']
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
@@ -482,10 +488,16 @@ class Finetunemodel(nn.Module):
         
         # Use RAFT forward method
         with torch.no_grad():
-            # RAFT expects [B, C, H, W] format for each image
-            # The ptlflow models have a unified forward signature.
-            outputs = self.of_model(last_H3_tmp, L2_tmp)
-            flow_up = outputs['flow_fw']
+            # Check if this is the local RAFT model or a ptlflow model
+            if hasattr(self.of_model, 'pad'):  # Local RAFT model has a 'pad' method
+                # Local RAFT expects two separate image tensors
+                _, flow_up = self.of_model(last_H3_tmp, L2_tmp, iters=12, test_mode=True)
+            else:
+                # ptlflow models expect a dictionary with stacked images
+                images_stacked = torch.stack([last_H3_tmp, L2_tmp], dim=1)  # [B, 2, C, H, W]
+                inputs_dict = {'images': images_stacked}
+                outputs = self.of_model(inputs_dict)
+                flow_up = outputs['flows']
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
