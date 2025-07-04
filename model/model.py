@@ -326,6 +326,9 @@ class Network(nn.Module):
                 inputs_dict = {'images': images_stacked}
                 outputs = self.of_model(inputs_dict)
                 flow_up = outputs['flows']
+                # ptlflow models may return a 5D tensor [B, T, C, H, W]. T=1 for 2 images.
+                if flow_up.dim() == 5:
+                    flow_up = flow_up.squeeze(1)
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
@@ -498,6 +501,9 @@ class Finetunemodel(nn.Module):
                 inputs_dict = {'images': images_stacked}
                 outputs = self.of_model(inputs_dict)
                 flow_up = outputs['flows']
+                # ptlflow models may return a 5D tensor [B, T, C, H, W]. T=1 for 2 images.
+                if flow_up.dim() == 5:
+                    flow_up = flow_up.squeeze(1)
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
