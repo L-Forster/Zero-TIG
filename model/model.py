@@ -139,6 +139,11 @@ class Network(nn.Module):
         # optical flow
         self.of_model = self.load_optical_flow_model(args, getattr(args, 'of_model_name', 'raft'), getattr(args, 'of_model_path', None))
         self.of_scale = args.of_scale
+        
+        # bidirectional optical flow settings
+        self.use_bidirectional_flow = getattr(args, 'use_bidirectional_flow', True)
+        self.occlusion_threshold = getattr(args, 'occlusion_threshold', 1.0)
+        self.flow_consistency_alpha = getattr(args, 'flow_consistency_alpha', 0.01)
 
     def load_optical_flow_model(self, args, model_name='raft', model_path=None):
         """Loads an optical flow model."""
@@ -293,21 +298,218 @@ class Network(nn.Module):
         self.last_H3 = H3.detach()
         self.last_s3 = s3.detach()
 
+    def compute_bidirectional_flow(self, img1, img2):
+        """
+        Compute bidirectional optical flow between two images.
+        
+        Args:
+            img1: Previous frame tensor [B, C, H, W]
+            img2: Current frame tensor [B, C, H, W]
+            
+        Returns:
+            flow_forward: Flow from img1 to img2 [B, 2, H, W]
+            flow_backward: Flow from img2 to img1 [B, 2, H, W]
+            occlusion_mask: Occlusion mask [B, 1, H, W] (1 = occluded, 0 = visible)
+        """
+        with torch.no_grad():
+            # Check if this is the local RAFT model or a ptlflow model
+            if hasattr(self.of_model, 'pad'):  # Local RAFT model
+                # Forward flow: img1 -> img2
+                _, flow_forward = self.of_model(img1, img2, iters=12, test_mode=True)
+                # Backward flow: img2 -> img1  
+                _, flow_backward = self.of_model(img2, img1, iters=12, test_mode=True)
+            else:
+                # ptlflow models
+                # Forward flow: img1 -> img2
+                images_forward = torch.stack([img1, img2], dim=1)  # [B, 2, C, H, W]
+                inputs_forward = {'images': images_forward}
+                outputs_forward = self.of_model(inputs_forward)
+                flow_forward = outputs_forward['flows']
+                if flow_forward.dim() == 5:
+                    flow_forward = flow_forward.squeeze(1)
+                
+                # Backward flow: img2 -> img1
+                images_backward = torch.stack([img2, img1], dim=1)  # [B, 2, C, H, W]
+                inputs_backward = {'images': images_backward}
+                outputs_backward = self.of_model(inputs_backward)
+                flow_backward = outputs_backward['flows']
+                if flow_backward.dim() == 5:
+                    flow_backward = flow_backward.squeeze(1)
+        
+        # Compute occlusion mask using forward-backward consistency
+        occlusion_mask = self.compute_occlusion_mask(flow_forward, flow_backward)
+        
+        return flow_forward, flow_backward, occlusion_mask
+
+    def compute_occlusion_mask(self, flow_forward, flow_backward):
+        """
+        Compute occlusion mask using forward-backward consistency check.
+        
+        Args:
+            flow_forward: Forward optical flow [B, 2, H, W]
+            flow_backward: Backward optical flow [B, 2, H, W]
+            
+        Returns:
+            occlusion_mask: Binary mask [B, 1, H, W] where 1 indicates occlusion
+        """
+        # Warp backward flow using forward flow
+        warped_flow_backward = self.warp_flow(flow_backward, flow_forward)
+        
+        # Compute forward-backward consistency error
+        flow_diff = flow_forward + warped_flow_backward
+        consistency_error = torch.norm(flow_diff, dim=1, keepdim=True)  # [B, 1, H, W]
+        
+        # Create occlusion mask based on consistency threshold
+        flow_magnitude = torch.norm(flow_forward, dim=1, keepdim=True)
+        adaptive_threshold = self.occlusion_threshold + self.flow_consistency_alpha * flow_magnitude
+        occlusion_mask = (consistency_error > adaptive_threshold).float()
+        
+        return occlusion_mask
+
+    def warp_flow(self, flow, warp_flow):
+        """
+        Warp optical flow using another flow field.
+        
+        Args:
+            flow: Flow to be warped [B, 2, H, W]
+            warp_flow: Flow used for warping [B, 2, H, W]
+            
+        Returns:
+            warped_flow: Warped flow [B, 2, H, W]
+        """
+        B, _, H, W = flow.shape
+        
+        # Create coordinate grid
+        grid_y, grid_x = torch.meshgrid(
+            torch.arange(H, dtype=torch.float32, device=flow.device),
+            torch.arange(W, dtype=torch.float32, device=flow.device)
+        )
+        grid = torch.stack([grid_x, grid_y], dim=0).unsqueeze(0).expand(B, -1, -1, -1)  # [B, 2, H, W]
+        
+        # Apply warping flow to coordinates
+        warped_coords = grid + warp_flow
+        
+        # Normalize coordinates to [-1, 1] for grid_sample
+        warped_coords[:, 0] = 2.0 * warped_coords[:, 0] / (W - 1) - 1.0  # x coordinates
+        warped_coords[:, 1] = 2.0 * warped_coords[:, 1] / (H - 1) - 1.0  # y coordinates
+        
+        # Reshape for grid_sample: [B, H, W, 2]
+        warped_coords = warped_coords.permute(0, 2, 3, 1)
+        
+        # Warp the flow
+        warped_flow = F.grid_sample(flow, warped_coords, mode='bilinear', 
+                                   padding_mode='zeros', align_corners=True)
+        
+        return warped_flow
+
+    def bidirectional_warp_tensor(self, flow_forward, flow_backward, occlusion_mask, 
+                                 tensor_prev, tensor_curr):
+        """
+        Perform bidirectional warping with occlusion handling.
+        
+        Args:
+            flow_forward: Forward flow [B, 2, H_flow, W_flow]
+            flow_backward: Backward flow [B, 2, H_flow, W_flow]
+            occlusion_mask: Occlusion mask [B, 1, H_flow, W_flow]
+            tensor_prev: Previous frame tensor to warp [B, C, H, W]
+            tensor_curr: Current frame tensor [B, C, H, W]
+            
+        Returns:
+            warped_tensor: Warped tensor with occlusion handling [B, C, H, W]
+            final_occlusion_mask: Occlusion mask at tensor resolution [B, 1, H, W]
+        """
+        B, C, H, W = tensor_prev.shape
+        _, _, H_flow, W_flow = flow_forward.shape
+        
+        # Resize flows and occlusion mask to match tensor resolution if needed
+        if H != H_flow or W != W_flow:
+            flow_forward_resized = F.interpolate(flow_forward, (H, W), mode='bilinear', align_corners=True)
+            flow_forward_resized = flow_forward_resized * torch.tensor([W / W_flow, H / H_flow], 
+                                                                      device=flow_forward.device).view(1, 2, 1, 1)
+            
+            flow_backward_resized = F.interpolate(flow_backward, (H, W), mode='bilinear', align_corners=True)
+            flow_backward_resized = flow_backward_resized * torch.tensor([W / W_flow, H / H_flow], 
+                                                                        device=flow_backward.device).view(1, 2, 1, 1)
+            
+            occlusion_mask_resized = F.interpolate(occlusion_mask, (H, W), mode='bilinear', align_corners=True)
+            occlusion_mask_resized = (occlusion_mask_resized > 0.5).float()
+        else:
+            flow_forward_resized = flow_forward
+            flow_backward_resized = flow_backward
+            occlusion_mask_resized = occlusion_mask
+        
+        # Forward warp: warp previous frame to current frame
+        warped_prev, _ = warp_tensor(flow_forward_resized, tensor_prev, tensor_curr)
+        
+        # Backward warp: warp current frame to previous frame, then forward again
+        # This can help fill occlusions with information from current frame
+        warped_curr_to_prev, _ = warp_tensor(flow_backward_resized, tensor_curr, tensor_prev)
+        warped_curr_back, _ = warp_tensor(flow_forward_resized, warped_curr_to_prev, tensor_curr)
+        
+        # Combine warped tensors using occlusion mask
+        # Use forward warp in non-occluded regions, fallback to backward warp in occluded regions
+        visibility_mask = 1.0 - occlusion_mask_resized  # 1 = visible, 0 = occluded
+        
+        # Weight the contributions
+        alpha = 0.8  # Weight for forward warp
+        beta = 0.2   # Weight for backward warp
+        
+        warped_tensor = (alpha * visibility_mask * warped_prev + 
+                        beta * visibility_mask * warped_curr_back + 
+                        occlusion_mask_resized * tensor_curr)  # Use current frame for occluded regions
+        
+        return warped_tensor, occlusion_mask_resized
+
     def update_cache(self, last_H3, last_s3, L2):
+        if not self.use_bidirectional_flow:
+            # Use original unidirectional method
+            return self.update_cache_unidirectional(last_H3, last_s3, L2)
+        
         # 0. resize
         ht_org, wd_org = last_H3[0].shape[-2:]
         ht = ht_org // self.of_scale
         wd = wd_org // self.of_scale
-        last_H3_tmp = F.interpolate(last_H3, (ht,wd), mode='bilinear')
-        L2_tmp = F.interpolate(L2, (ht,wd), mode='bilinear')
+        last_H3_tmp = F.interpolate(last_H3, (ht, wd), mode='bilinear')
+        L2_tmp = F.interpolate(L2, (ht, wd), mode='bilinear')
 
         # 1. Equalize the histogram
-        # last_H3_tmp = equalize((last_H3_tmp * 255).to(torch.uint8))
         last_H3_tmp = last_H3_tmp * 255
-        last_H3_tmp = last_H3_tmp.to(torch.float32) #/ 255.0
+        last_H3_tmp = last_H3_tmp.to(torch.float32)
 
         L2_tmp = equalize((L2_tmp * 255).to(torch.uint8))
-        L2_tmp = L2_tmp.to(torch.float32) #/ 255.0
+        L2_tmp = L2_tmp.to(torch.float32)
+
+        # 2. Ensure RAFT model is on the same device
+        self.of_model = self.of_model.to(L2.device)
+        self.of_model.eval()
+
+        # 3. Compute bidirectional optical flow
+        flow_forward, flow_backward, occlusion_mask = self.compute_bidirectional_flow(last_H3_tmp, L2_tmp)
+
+        # 4. Bidirectional warping with occlusion handling
+        warped_tensor_H3, final_occlusion_mask = self.bidirectional_warp_tensor(
+            flow_forward, flow_backward, occlusion_mask, last_H3, L2)
+        
+        warped_tensor_s3, _ = self.bidirectional_warp_tensor(
+            flow_forward, flow_backward, occlusion_mask, last_s3, L2)
+
+        return warped_tensor_H3, warped_tensor_s3
+
+    def update_cache_unidirectional(self, last_H3, last_s3, L2):
+        """Original unidirectional optical flow method for backward compatibility."""
+        # 0. resize
+        ht_org, wd_org = last_H3[0].shape[-2:]
+        ht = ht_org // self.of_scale
+        wd = wd_org // self.of_scale
+        last_H3_tmp = F.interpolate(last_H3, (ht, wd), mode='bilinear')
+        L2_tmp = F.interpolate(L2, (ht, wd), mode='bilinear')
+
+        # 1. Equalize the histogram
+        last_H3_tmp = last_H3_tmp * 255
+        last_H3_tmp = last_H3_tmp.to(torch.float32)
+
+        L2_tmp = equalize((L2_tmp * 255).to(torch.uint8))
+        L2_tmp = L2_tmp.to(torch.float32)
 
         # 2. OF last->this
         # Ensure RAFT model is on the same device as the inputs
@@ -329,18 +531,10 @@ class Network(nn.Module):
                 # ptlflow models may return a 5D tensor [B, T, C, H, W]. T=1 for 2 images.
                 if flow_up.dim() == 5:
                     flow_up = flow_up.squeeze(1)
-        # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
         warped_tensor_H3, overlap_tensor = warp_tensor(flow_up, last_H3, L2)
         warped_tensor_s3, _ = warp_tensor(flow_up, last_s3, L2)
-        # warped_img = self.cvt_ts2np(warped_tensor)
-        # overlap_img = self.cvt_ts2np(overlap_tensor)
-        #
-        # img_flo = cv2.resize(np.concatenate([warped_img, overlap_img], axis=0), (1920, 2160))
-        # cv2.imshow('image', img_flo)
-        # cv2.waitKey(5)
-        # cv2.imwrite('./img_flo.png', (img_flo*255).astype(np.uint8))
 
         return warped_tensor_H3, warped_tensor_s3
 
@@ -376,6 +570,10 @@ class Finetunemodel(nn.Module):
         self.of_model = self.load_optical_flow_model(args, getattr(args, 'of_model_name', 'raft'), getattr(args, 'of_model_path', None))
         self.of_scale = args.of_scale
 
+        # bidirectional optical flow settings
+        self.use_bidirectional_flow = getattr(args, 'use_bidirectional_flow', True)
+        self.occlusion_threshold = getattr(args, 'occlusion_threshold', 1.0)
+        self.flow_consistency_alpha = getattr(args, 'flow_consistency_alpha', 0.01)
 
     def load_optical_flow_model(self, args, model_name='raft', model_path=None):
         """Loads an optical flow model."""
@@ -430,6 +628,168 @@ class Finetunemodel(nn.Module):
         if isinstance(m, nn.BatchNorm2d):
             m.weight.data.normal_(1., 0.02)
 
+    def compute_bidirectional_flow(self, img1, img2):
+        """
+        Compute bidirectional optical flow between two images.
+        
+        Args:
+            img1: Previous frame tensor [B, C, H, W]
+            img2: Current frame tensor [B, C, H, W]
+            
+        Returns:
+            flow_forward: Flow from img1 to img2 [B, 2, H, W]
+            flow_backward: Flow from img2 to img1 [B, 2, H, W]
+            occlusion_mask: Occlusion mask [B, 1, H, W] (1 = occluded, 0 = visible)
+        """
+        with torch.no_grad():
+            # Check if this is the local RAFT model or a ptlflow model
+            if hasattr(self.of_model, 'pad'):  # Local RAFT model
+                # Forward flow: img1 -> img2
+                _, flow_forward = self.of_model(img1, img2, iters=12, test_mode=True)
+                # Backward flow: img2 -> img1  
+                _, flow_backward = self.of_model(img2, img1, iters=12, test_mode=True)
+            else:
+                # ptlflow models
+                # Forward flow: img1 -> img2
+                images_forward = torch.stack([img1, img2], dim=1)  # [B, 2, C, H, W]
+                inputs_forward = {'images': images_forward}
+                outputs_forward = self.of_model(inputs_forward)
+                flow_forward = outputs_forward['flows']
+                if flow_forward.dim() == 5:
+                    flow_forward = flow_forward.squeeze(1)
+                
+                # Backward flow: img2 -> img1
+                images_backward = torch.stack([img2, img1], dim=1)  # [B, 2, C, H, W]
+                inputs_backward = {'images': images_backward}
+                outputs_backward = self.of_model(inputs_backward)
+                flow_backward = outputs_backward['flows']
+                if flow_backward.dim() == 5:
+                    flow_backward = flow_backward.squeeze(1)
+        
+        # Compute occlusion mask using forward-backward consistency
+        occlusion_mask = self.compute_occlusion_mask(flow_forward, flow_backward)
+        
+        return flow_forward, flow_backward, occlusion_mask
+
+    def compute_occlusion_mask(self, flow_forward, flow_backward):
+        """
+        Compute occlusion mask using forward-backward consistency check.
+        
+        Args:
+            flow_forward: Forward optical flow [B, 2, H, W]
+            flow_backward: Backward optical flow [B, 2, H, W]
+            
+        Returns:
+            occlusion_mask: Binary mask [B, 1, H, W] where 1 indicates occlusion
+        """
+        # Warp backward flow using forward flow
+        warped_flow_backward = self.warp_flow(flow_backward, flow_forward)
+        
+        # Compute forward-backward consistency error
+        flow_diff = flow_forward + warped_flow_backward
+        consistency_error = torch.norm(flow_diff, dim=1, keepdim=True)  # [B, 1, H, W]
+        
+        # Create occlusion mask based on consistency threshold
+        flow_magnitude = torch.norm(flow_forward, dim=1, keepdim=True)
+        adaptive_threshold = self.occlusion_threshold + self.flow_consistency_alpha * flow_magnitude
+        occlusion_mask = (consistency_error > adaptive_threshold).float()
+        
+        return occlusion_mask
+
+    def warp_flow(self, flow, warp_flow):
+        """
+        Warp optical flow using another flow field.
+        
+        Args:
+            flow: Flow to be warped [B, 2, H, W]
+            warp_flow: Flow used for warping [B, 2, H, W]
+            
+        Returns:
+            warped_flow: Warped flow [B, 2, H, W]
+        """
+        B, _, H, W = flow.shape
+        
+        # Create coordinate grid
+        grid_y, grid_x = torch.meshgrid(
+            torch.arange(H, dtype=torch.float32, device=flow.device),
+            torch.arange(W, dtype=torch.float32, device=flow.device)
+        )
+        grid = torch.stack([grid_x, grid_y], dim=0).unsqueeze(0).expand(B, -1, -1, -1)  # [B, 2, H, W]
+        
+        # Apply warping flow to coordinates
+        warped_coords = grid + warp_flow
+        
+        # Normalize coordinates to [-1, 1] for grid_sample
+        warped_coords[:, 0] = 2.0 * warped_coords[:, 0] / (W - 1) - 1.0  # x coordinates
+        warped_coords[:, 1] = 2.0 * warped_coords[:, 1] / (H - 1) - 1.0  # y coordinates
+        
+        # Reshape for grid_sample: [B, H, W, 2]
+        warped_coords = warped_coords.permute(0, 2, 3, 1)
+        
+        # Warp the flow
+        warped_flow = F.grid_sample(flow, warped_coords, mode='bilinear', 
+                                   padding_mode='zeros', align_corners=True)
+        
+        return warped_flow
+
+    def bidirectional_warp_tensor(self, flow_forward, flow_backward, occlusion_mask, 
+                                 tensor_prev, tensor_curr):
+        """
+        Perform bidirectional warping with occlusion handling.
+        
+        Args:
+            flow_forward: Forward flow [B, 2, H_flow, W_flow]
+            flow_backward: Backward flow [B, 2, H_flow, W_flow]
+            occlusion_mask: Occlusion mask [B, 1, H_flow, W_flow]
+            tensor_prev: Previous frame tensor to warp [B, C, H, W]
+            tensor_curr: Current frame tensor [B, C, H, W]
+            
+        Returns:
+            warped_tensor: Warped tensor with occlusion handling [B, C, H, W]
+            final_occlusion_mask: Occlusion mask at tensor resolution [B, 1, H, W]
+        """
+        B, C, H, W = tensor_prev.shape
+        _, _, H_flow, W_flow = flow_forward.shape
+        
+        # Resize flows and occlusion mask to match tensor resolution if needed
+        if H != H_flow or W != W_flow:
+            flow_forward_resized = F.interpolate(flow_forward, (H, W), mode='bilinear', align_corners=True)
+            flow_forward_resized = flow_forward_resized * torch.tensor([W / W_flow, H / H_flow], 
+                                                                      device=flow_forward.device).view(1, 2, 1, 1)
+            
+            flow_backward_resized = F.interpolate(flow_backward, (H, W), mode='bilinear', align_corners=True)
+            flow_backward_resized = flow_backward_resized * torch.tensor([W / W_flow, H / H_flow], 
+                                                                        device=flow_backward.device).view(1, 2, 1, 1)
+            
+            occlusion_mask_resized = F.interpolate(occlusion_mask, (H, W), mode='bilinear', align_corners=True)
+            occlusion_mask_resized = (occlusion_mask_resized > 0.5).float()
+        else:
+            flow_forward_resized = flow_forward
+            flow_backward_resized = flow_backward
+            occlusion_mask_resized = occlusion_mask
+        
+        # Forward warp: warp previous frame to current frame
+        warped_prev, _ = warp_tensor(flow_forward_resized, tensor_prev, tensor_curr)
+        
+        # Backward warp: warp current frame to previous frame, then forward again
+        # This can help fill occlusions with information from current frame
+        warped_curr_to_prev, _ = warp_tensor(flow_backward_resized, tensor_curr, tensor_prev)
+        warped_curr_back, _ = warp_tensor(flow_forward_resized, warped_curr_to_prev, tensor_curr)
+        
+        # Combine warped tensors using occlusion mask
+        # Use forward warp in non-occluded regions, fallback to backward warp in occluded regions
+        visibility_mask = 1.0 - occlusion_mask_resized  # 1 = visible, 0 = occluded
+        
+        # Weight the contributions
+        alpha = 0.8  # Weight for forward warp
+        beta = 0.2   # Weight for backward warp
+        
+        warped_tensor = (alpha * visibility_mask * warped_prev + 
+                        beta * visibility_mask * warped_curr_back + 
+                        occlusion_mask_resized * tensor_curr)  # Use current frame for occluded regions
+        
+        return warped_tensor, occlusion_mask_resized
+
     def forward(self, input):
         eps = 1e-4
         input = input + eps
@@ -469,6 +829,10 @@ class Finetunemodel(nn.Module):
         self.last_s3 = s3.detach()
 
     def update_cache(self, last_H3, last_s3, L2):
+        if not self.use_bidirectional_flow:
+            # Use original unidirectional method
+            return self.update_cache_unidirectional(last_H3, last_s3, L2)
+        
         # 0. resize
         ht_org, wd_org = last_H3[0].shape[-2:]
         ht = ht_org // self.of_scale
@@ -477,12 +841,43 @@ class Finetunemodel(nn.Module):
         L2_tmp = F.interpolate(L2, (ht, wd), mode='bilinear')
 
         # 1. Equalize the histogram
-        # last_H3_tmp = equalize((last_H3_tmp * 255).to(torch.uint8))
         last_H3_tmp = last_H3_tmp * 255
-        last_H3_tmp = last_H3_tmp.to(torch.float32)  # / 255.0
+        last_H3_tmp = last_H3_tmp.to(torch.float32)
 
         L2_tmp = equalize((L2_tmp * 255).to(torch.uint8))
-        L2_tmp = L2_tmp.to(torch.float32)  # / 255.0
+        L2_tmp = L2_tmp.to(torch.float32)
+
+        # 2. Ensure RAFT model is on the same device
+        self.of_model = self.of_model.to(L2.device)
+        self.of_model.eval()
+
+        # 3. Compute bidirectional optical flow
+        flow_forward, flow_backward, occlusion_mask = self.compute_bidirectional_flow(last_H3_tmp, L2_tmp)
+
+        # 4. Bidirectional warping with occlusion handling
+        warped_tensor_H3, final_occlusion_mask = self.bidirectional_warp_tensor(
+            flow_forward, flow_backward, occlusion_mask, last_H3, L2)
+        
+        warped_tensor_s3, _ = self.bidirectional_warp_tensor(
+            flow_forward, flow_backward, occlusion_mask, last_s3, L2)
+
+        return warped_tensor_H3, warped_tensor_s3
+
+    def update_cache_unidirectional(self, last_H3, last_s3, L2):
+        """Original unidirectional optical flow method for backward compatibility."""
+        # 0. resize
+        ht_org, wd_org = last_H3[0].shape[-2:]
+        ht = ht_org // self.of_scale
+        wd = wd_org // self.of_scale
+        last_H3_tmp = F.interpolate(last_H3, (ht, wd), mode='bilinear')
+        L2_tmp = F.interpolate(L2, (ht, wd), mode='bilinear')
+
+        # 1. Equalize the histogram
+        last_H3_tmp = last_H3_tmp * 255
+        last_H3_tmp = last_H3_tmp.to(torch.float32)
+
+        L2_tmp = equalize((L2_tmp * 255).to(torch.uint8))
+        L2_tmp = L2_tmp.to(torch.float32)
 
         # 2. OF last->this
         # Ensure RAFT model is on the same device as the inputs
@@ -504,17 +899,9 @@ class Finetunemodel(nn.Module):
                 # ptlflow models may return a 5D tensor [B, T, C, H, W]. T=1 for 2 images.
                 if flow_up.dim() == 5:
                     flow_up = flow_up.squeeze(1)
-        # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
         warped_tensor_H3, overlap_tensor = warp_tensor(flow_up, last_H3, L2)
         warped_tensor_s3, _ = warp_tensor(flow_up, last_s3, L2)
-        # warped_img = self.cvt_ts2np(warped_tensor)
-        # overlap_img = self.cvt_ts2np(overlap_tensor)
-        #
-        # img_flo = cv2.resize(np.concatenate([warped_img, overlap_img], axis=0), (1920, 2160))
-        # cv2.imshow('image', img_flo)
-        # cv2.waitKey(5)
-        # cv2.imwrite('./img_flo.png', (img_flo*255).astype(np.uint8))
 
         return warped_tensor_H3, warped_tensor_s3

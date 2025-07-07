@@ -28,6 +28,9 @@ parser.add_argument('--num_workers', type=int, default=0, help='number of datalo
 parser.add_argument('--of_model_path', type=str, default=None, help='Path to the optical flow model checkpoint.')
 parser.add_argument('--of_model_name', type=str, default='raft', help='Name of the optical flow model to use.')
 parser.add_argument('--use_self_ensemble', type=lambda x: (str(x).lower() == 'true'), default=True, help='Use self-ensemble module in the model.')
+parser.add_argument('--use_bidirectional_flow', type=lambda x: (str(x).lower() == 'true'), default=True, help='Use bidirectional optical flow for warping.')
+parser.add_argument('--occlusion_threshold', type=float, default=1.0, help='Threshold for occlusion detection in bidirectional flow.')
+parser.add_argument('--flow_consistency_alpha', type=float, default=0.01, help='Alpha parameter for adaptive occlusion threshold.')
 
 args = parser.parse_args()
 

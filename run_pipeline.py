@@ -95,6 +95,12 @@ def main():
                         help="Name of the optical flow model to use (e.g., 'raft', 'dpflow').")
     parser.add_argument('--disable_self_ensemble', action='store_true',
                         help="If set, disables the self-ensemble module in the model.")
+    parser.add_argument('--disable_bidirectional_flow', action='store_true',
+                        help="If set, disables bidirectional optical flow for warping.")
+    parser.add_argument('--occlusion_threshold', type=float, default=1.0,
+                        help="Threshold for occlusion detection in bidirectional flow.")
+    parser.add_argument('--flow_consistency_alpha', type=float, default=0.01,
+                        help="Alpha parameter for adaptive occlusion threshold.")
     
     args = parser.parse_args()
 
@@ -146,6 +152,14 @@ def main():
         else:
             train_cmd.extend(['--use_self_ensemble', 'False'])
         
+        if not args.disable_bidirectional_flow:
+            train_cmd.extend(['--use_bidirectional_flow', 'True'])
+        else:
+            train_cmd.extend(['--use_bidirectional_flow', 'False'])
+        
+        train_cmd.extend(['--occlusion_threshold', str(args.occlusion_threshold)])
+        train_cmd.extend(['--flow_consistency_alpha', str(args.flow_consistency_alpha)])
+        
         if args.of_model_path:
             train_cmd.extend(['--of_model_name', args.of_model_name])
             train_cmd.extend(['--of_model_path', args.of_model_path])
@@ -183,6 +197,14 @@ def main():
             eval_cmd.extend(['--use_self_ensemble', 'True'])
         else:
             eval_cmd.extend(['--use_self_ensemble', 'False'])
+        
+        if not args.disable_bidirectional_flow:
+            eval_cmd.extend(['--use_bidirectional_flow', 'True'])
+        else:
+            eval_cmd.extend(['--use_bidirectional_flow', 'False'])
+        
+        eval_cmd.extend(['--occlusion_threshold', str(args.occlusion_threshold)])
+        eval_cmd.extend(['--flow_consistency_alpha', str(args.flow_consistency_alpha)])
         
         if args.of_model_path:
             eval_cmd.extend(['--of_model_name', args.of_model_name])
