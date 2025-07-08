@@ -115,14 +115,9 @@ class Network(nn.Module):
 
         self.enhance = Enhancer(layers=3, channels=64)
         
-        self.use_ensemble = getattr(args, 'use_self_ensemble', True)
-        if self.use_ensemble:
-            self.denoise_1 = SelfEnsemble(Denoise_1(chan_embed=48))
-            self.denoise_2 = SelfEnsemble(Denoise_2(chan_embed=48))
-        else:
-            self.denoise_1 = Denoise_1(chan_embed=48)
-            self.denoise_2 = Denoise_2(chan_embed=48)
-            
+
+        self.denoise_1 = Denoise_1(chan_embed=48)
+        self.denoise_2 = Denoise_2(chan_embed=48)
         self._l2_loss = nn.MSELoss()
         self._l1_loss = nn.L1Loss()
         self.is_WB = True if 'underwater' == args.dataset else False
@@ -143,13 +138,9 @@ class Network(nn.Module):
     def load_optical_flow_model(self, args, model_name='raft', model_path=None):
         """Loads an optical flow model."""
         if model_path:
-            # A specific checkpoint is provided. Get the model architecture first.
             model = ptlflow.get_model(model_name)
             
-            # Manually load the checkpoint. This is more robust to different formats.
-            ckpt = torch.load(model_path, map_location='cpu')
-            
-            # The checkpoint could be the state_dict itself, or it could be nested.
+            ckpt = torch.load(model_path, map_location=torch.device(DEVICE))
             if 'state_dict' in ckpt:
                 state_dict = ckpt['state_dict']
             elif 'model' in ckpt:
@@ -157,7 +148,6 @@ class Network(nn.Module):
             else:
                 state_dict = ckpt
             
-            # The state_dict may have keys with a 'module.' prefix; remove it.
             from collections import OrderedDict
             new_state_dict = OrderedDict()
             for k, v in state_dict.items():
@@ -171,7 +161,6 @@ class Network(nn.Module):
             # Default behavior: load the original RAFT model
             model = RAFT(args)
         else:
-            # A different model name is given, but no path. Load pretrained from ptlflow.
             model = ptlflow.get_model(model_name)
             
         model.eval()
@@ -316,9 +305,8 @@ class Network(nn.Module):
         
         # Use RAFT forward method
         with torch.no_grad():
-            # Check if this is the local RAFT model or a ptlflow model
-            if hasattr(self.of_model, 'pad'):  # Local RAFT model has a 'pad' method
-                # Local RAFT expects two separate image tensors
+
+            if hasattr(self.of_model, 'pad'):  
                 _, flow_up = self.of_model(last_H3_tmp, L2_tmp, iters=12, test_mode=True)
             else:
                 # ptlflow models expect a dictionary with stacked images
@@ -380,13 +368,10 @@ class Finetunemodel(nn.Module):
     def load_optical_flow_model(self, args, model_name='raft', model_path=None):
         """Loads an optical flow model."""
         if model_path:
-            # A specific checkpoint is provided. Get the model architecture first.
             model = ptlflow.get_model(model_name)
             
-            # Manually load the checkpoint. This is more robust to different formats.
             ckpt = torch.load(model_path, map_location='cpu')
             
-            # The checkpoint could be the state_dict itself, or it could be nested.
             if 'state_dict' in ckpt:
                 state_dict = ckpt['state_dict']
             elif 'model' in ckpt:
@@ -394,7 +379,6 @@ class Finetunemodel(nn.Module):
             else:
                 state_dict = ckpt
             
-            # The state_dict may have keys with a 'module.' prefix; remove it.
             from collections import OrderedDict
             new_state_dict = OrderedDict()
             for k, v in state_dict.items():
@@ -449,9 +433,9 @@ class Finetunemodel(nn.Module):
         H2 = input / s2
         H2 = torch.clamp(H2, eps, 1)
 
-        if self.is_new_seq:
-            self.last_H3_wp = H2.detach()
-            self.last_s3_wp = H2.detach()
+        # if self.is_new_seq:
+        #     self.last_H3_wp = H2.detach()
+        #     self.last_s3_wp = H2.detach()
 
         denoise2_input = torch.cat([self.last_H3_wp, self.last_s3_wp, H2, s2], 1)
         denoise2_subtract_input = torch.cat([H2, s2], 1).detach()
@@ -492,11 +476,9 @@ class Finetunemodel(nn.Module):
         # Use RAFT forward method
         with torch.no_grad():
             # Check if this is the local RAFT model or a ptlflow model
-            if hasattr(self.of_model, 'pad'):  # Local RAFT model has a 'pad' method
-                # Local RAFT expects two separate image tensors
+            if hasattr(self.of_model, 'pad'):  
                 _, flow_up = self.of_model(last_H3_tmp, L2_tmp, iters=12, test_mode=True)
             else:
-                # ptlflow models expect a dictionary with stacked images
                 images_stacked = torch.stack([last_H3_tmp, L2_tmp], dim=1)  # [B, 2, C, H, W]
                 inputs_dict = {'images': images_stacked}
                 outputs = self.of_model(inputs_dict)
