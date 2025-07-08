@@ -12,32 +12,6 @@ import numpy as np
 import cv2
 
 
-class SelfEnsemble(nn.Module):
-    def __init__(self, model):
-        super(SelfEnsemble, self).__init__()
-        self.model = model
-
-    def forward(self, x):
-        # h-flip
-        x_hflip = torch.flip(x, dims=[3])
-        out_hflip = self.model(x_hflip)
-        out_hflip = torch.flip(out_hflip, dims=[3])
-
-        # v-flip
-        x_vflip = torch.flip(x, dims=[2])
-        out_vflip = self.model(x_vflip)
-        out_vflip = torch.flip(out_vflip, dims=[2])
-
-        # rot90
-        x_rot90 = torch.rot90(x, 1, [2, 3])
-        out_rot90 = self.model(x_rot90)
-        out_rot90 = torch.rot90(out_rot90, -1, [2, 3])
-
-        # original
-        out = self.model(x)
-
-        return (out + out_hflip + out_vflip + out_rot90) / 4.0
-
 
 class Denoise_1(nn.Module):
     def __init__(self, chan_embed=48):
@@ -140,7 +114,7 @@ class Network(nn.Module):
         if model_path:
             model = ptlflow.get_model(model_name)
             
-            ckpt = torch.load(model_path, map_location=torch.device(DEVICE))
+            ckpt = torch.load(model_path, map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
             if 'state_dict' in ckpt:
                 state_dict = ckpt['state_dict']
             elif 'model' in ckpt:
@@ -384,7 +358,7 @@ class Finetunemodel(nn.Module):
             for k, v in state_dict.items():
                 name = k
                 if name.startswith('module.'):
-                    name = name[7:]  # remove 'module.'
+                    name = name[7:] 
                 new_state_dict[name] = v
             
             model.load_state_dict(new_state_dict, strict=False)
