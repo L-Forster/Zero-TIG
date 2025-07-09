@@ -809,9 +809,9 @@ class Finetunemodel(nn.Module):
         H2 = input / s2
         H2 = torch.clamp(H2, eps, 1)
 
-        if self.is_new_seq:
-            self.last_H3_wp = H2.detach()
-            self.last_s3_wp = H2.detach()
+        # if self.is_new_seq:
+        #     self.last_H3_wp = H2.detach()
+        #     self.last_s3_wp = H2.detach()
 
         denoise2_input = torch.cat([self.last_H3_wp, self.last_s3_wp, H2, s2], 1)
         denoise2_subtract_input = torch.cat([H2, s2], 1).detach()
