@@ -35,13 +35,11 @@ parser.add_argument('--model_pretrain', type=str,
 parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
 parser.add_argument('--seed', type=int, default=2, help='random seed')
 parser.add_argument('--of_scale', type=int, default=3, help='downscale size when compute OF')
+parser.add_argument('--of_model_name', type=str, default='dpflow', help='Name of the optical flow model to use (e.g., \'raft\', \'dpflow\').')
+parser.add_argument('--of_model_path', type=str, default=None, help='Path to a custom optical flow model checkpoint.')
 parser.add_argument('--dataset', type=str, default='RLV', help='Specified data set')
 parser.add_argument('--gain', type=int, default=100, help='OF loss gain')
 parser.add_argument('--name', type=str, default='run', help='A name for the evaluation run, used for log and metric file names.')
-parser.add_argument('--of_model_path', type=str, default=None, help='Path to the optical flow model checkpoint.')
-parser.add_argument('--of_model_name', type=str, default='raft', help='Name of the optical flow model to use.')
-parser.add_argument('--use_self_ensemble', type=lambda x: (str(x).lower() == 'true'), default=True, help='Use self-ensemble module in the model.')
-
 
 args = parser.parse_args()
 save_path = args.save

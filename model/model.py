@@ -281,8 +281,10 @@ class Network(nn.Module):
         with torch.no_grad():
 
             if hasattr(self.of_model, 'pad'):  
-                _, flow_up = self.of_model(last_H3_tmp, L2_tmp, iters=12, test_mode=True)
+                print("RAFT model")
+                _, flow_up = self.of_model(L2_tmp, last_H3_tmp, iters=20, test_mode=True)
             else:
+                print("ptlflow model")
                 # ptlflow models expect a dictionary with stacked images
                 images_stacked = torch.stack([last_H3_tmp, L2_tmp], dim=1)  # [B, 2, C, H, W]
                 inputs_dict = {'images': images_stacked}
@@ -313,13 +315,9 @@ class Finetunemodel(nn.Module):
         super(Finetunemodel, self).__init__()
         self.args = args
 
-        self.use_ensemble = getattr(args, 'use_self_ensemble', True)
-        if self.use_ensemble:
-            self.denoise_1 = SelfEnsemble(Denoise_1(chan_embed=48))
-            self.denoise_2 = SelfEnsemble(Denoise_2(chan_embed=48))
-        else:
-            self.denoise_1 = Denoise_1(chan_embed=48)
-            self.denoise_2 = Denoise_2(chan_embed=48)
+
+        self.denoise_1 = Denoise_1(chan_embed=48)
+        self.denoise_2 = Denoise_2(chan_embed=48)
 
         self.enhance = Enhancer(layers=3, channels=64)
         base_weights = torch.load(args.model_pretrain, map_location='cuda:0')

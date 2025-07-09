@@ -146,8 +146,8 @@ def main():
         else:
             train_cmd.extend(['--use_self_ensemble', 'False'])
         
+        train_cmd.extend(['--of_model_name', args.of_model_name])
         if args.of_model_path:
-            train_cmd.extend(['--of_model_name', args.of_model_name])
             train_cmd.extend(['--of_model_path', args.of_model_path])
         
         if not run_command(train_cmd, logger):
@@ -179,13 +179,9 @@ def main():
             '--save', eval_save_dir,
             '--name', args.eval_name
         ]
-        if not args.disable_self_ensemble:
-            eval_cmd.extend(['--use_self_ensemble', 'True'])
-        else:
-            eval_cmd.extend(['--use_self_ensemble', 'False'])
         
+        eval_cmd.extend(['--of_model_name', args.of_model_name])
         if args.of_model_path:
-            eval_cmd.extend(['--of_model_name', args.of_model_name])
             eval_cmd.extend(['--of_model_path', args.of_model_path])
         
         if not run_command(eval_cmd, logger):
