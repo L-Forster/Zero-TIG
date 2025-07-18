@@ -83,38 +83,57 @@ class RLVDataLoader(BaseDataset):
         self.train_target_data_names = []
         assert os.path.exists(self.low_img_dir), "Input directory does not exist!"
 
-        self.train_low_data_names = self.load_dataset_BVI(self.low_img_dir, task)
+        self.train_low_data_names = self.load_dataset_BVI(self.low_img_dir, task, getattr(args, 'target_sequence', None))
 
         self.count = len(self.train_low_data_names)
         transform_list = []
         transform_list += [transforms.ToTensor()]
         self.transform = transforms.Compose(transform_list)
-        self.last_data_name_path = self.train_low_data_names[0]
+        if self.count > 0:
+            self.last_data_name_path = self.train_low_data_names[0]
+        else:
+            self.last_data_name_path = None
 
-    def load_dataset_BVI(self, dir, task):
+    def load_dataset_BVI(self, dir, task, target_sequence=None):
         img_list = []
+        
+        # If a specific sequence is targeted, ignore the list file and load it directly.
+        if target_sequence:
+            print(f"Loading data for target sequence: {target_sequence}")
+            sequence_path = os.path.join(dir, 'input', target_sequence)
+            if not os.path.isdir(sequence_path):
+                print(f"Error: Directory for target sequence not found at {sequence_path}")
+                return []
+            
+            # Find all image files in the specified sequence directory and its subdirectories
+            # This handles cases like 'low_light_10', 'low_light_20', etc., automatically.
+            img_list = glob.glob(os.path.join(sequence_path, '**', '*.png'), recursive=True)
+            img_list.extend(glob.glob(os.path.join(sequence_path, '**', '*.jpg'), recursive=True))
+            
+            img_list = self.sort_files_by_name(img_list)
+            if not img_list:
+                print(f"Warning: No images found for target sequence '{target_sequence}' in path {sequence_path}")
+            return img_list
+
+        # If no target sequence, fall back to the original logic of reading from a list file.
         ll_10_dir_name = "low_light_10"
         ll_20_dir_name = "low_light_20"
         assert task == 'train' or task == 'test', "Invalid phase: " + str(task)
 
         phase_list_file = str(task) + '_list.txt'
-        # image_list_lowlight = []
-        with open(os.path.join(dir, phase_list_file), 'r') as file:
-            phase_list = file.readlines()
-            assert len(phase_list) > 0, "No input data."
+        try:
+            with open(os.path.join(dir, phase_list_file), 'r') as file:
+                    phase_list = [line.strip() for line in file.readlines() if line.strip()]
+                    assert len(phase_list) > 0, f"No sequences listed in {phase_list_file}."
+        except FileNotFoundError:
+            print(f"Error: Phase list file not found at {os.path.join(dir, phase_list_file)}")
+            return []
         
-        print("phase_list:", phase_list)
+        print("Processing sequences from list:", phase_list)
         
         for folder_name in phase_list:
-            folder_name = folder_name.strip()
-            print("folder_name:", folder_name)
-            # train_ll_10_list = glob.glob(os.path.join(dir, 'input', folder_name, ll_10_dir_name, "*.png"))
-            # train_ll_20_list = glob.glob(os.path.join(dir, 'input', folder_name, ll_20_dir_name, "*.png"))
             train_ll_10_list = glob.glob(os.path.join(dir, 'input', folder_name, ll_10_dir_name, "*.png"))
             train_ll_20_list = glob.glob(os.path.join(dir, 'input', folder_name, ll_20_dir_name, "*.png"))
-            
-            print("Path for low_light_10:", os.path.join(dir, 'input', folder_name, ll_10_dir_name, "*.png"))
-            print("Path exists?", os.path.exists(os.path.join(dir, 'input', folder_name)))
 
             # sort file by name:
             train_ll_10_list = self.sort_files_by_name(train_ll_10_list)
@@ -122,9 +141,7 @@ class RLVDataLoader(BaseDataset):
 
             img_list.extend(train_ll_10_list)
             img_list.extend(train_ll_20_list)
-            print("train_ll_10_list ",train_ll_10_list)
-            print("train_ll_20_list ",train_ll_20_list)
-        print("img_list ",img_list)
+            
         return img_list
 
     def load_images_transform(self, file):

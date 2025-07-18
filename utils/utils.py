@@ -160,6 +160,40 @@ def sequential_judgment(img_path, last_img_path):
     return is_new_seq
 
 
+def get_next_frame_path(current_frame_path):
+    """
+    Finds the path to the next frame in a sequence.
+    Assumes frame filenames are integers (e.g., '0001.png', '0002.png').
+    Returns the path to the next frame, or None if it doesn't exist.
+    """
+    if not current_frame_path or not os.path.exists(current_frame_path):
+        return None
+
+    directory, filename = os.path.split(current_frame_path)
+    name, ext = os.path.splitext(filename)
+
+    try:
+        current_idx = int(name)
+        next_idx = current_idx + 1
+        
+        # Format next frame name with same padding as current frame
+        next_filename = f"{next_idx:0{len(name)}d}{ext}"
+        next_frame_path = os.path.join(directory, next_filename)
+
+        if os.path.exists(next_frame_path):
+            return next_frame_path
+        else:
+            # Fallback for non-padded filenames like '1.png'
+            next_filename_no_pad = f"{next_idx}{ext}"
+            next_frame_path_no_pad = os.path.join(directory, next_filename_no_pad)
+            if os.path.exists(next_frame_path_no_pad):
+                return next_frame_path_no_pad
+            return None
+    except ValueError:
+        # If filename is not a simple integer, we cannot determine the next frame.
+        return None
+
+
 def viz(img, flo):
     img = img[0].permute(1, 2, 0).cpu().numpy()
     flo = flo[0].permute(1, 2, 0).cpu().numpy()
