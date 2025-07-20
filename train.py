@@ -112,15 +112,15 @@ def main():
     # Dataset
     TrainDataset = CreateDataset(args, task='train')
     logging.info("Training data: %d", TrainDataset.__len__())
-    TestDataset = CreateDataset(args, task='test')
-    logging.info("Test data: %d", TestDataset.__len__())
+    # TestDataset = CreateDataset(args, task='test')
+    # logging.info("Test data: %d", TestDataset.__len__())
 
     train_queue = torch.utils.data.DataLoader(
         TrainDataset, batch_size=args.batch_size,
         pin_memory=True, num_workers=args.num_workers, shuffle=False, generator=torch.Generator(device='cuda'))
-    test_queue = torch.utils.data.DataLoader(
-        TestDataset, batch_size=1,
-        pin_memory=True, num_workers=args.num_workers, shuffle=False, generator=torch.Generator(device='cuda'))
+    # test_queue = torch.utils.data.DataLoader(
+    #     TestDataset, batch_size=1,
+    #     pin_memory=True, num_workers=args.num_workers, shuffle=False, generator=torch.Generator(device='cuda'))
 
     total_step = 0
     model.train()
@@ -144,22 +144,22 @@ def main():
         logging.info('train-epoch %03d %f', epoch, np.average(losses))
         utils.save(model, os.path.join(model_path, 'weights_%d.pt' % epoch))
 
-        if epoch % 1 == 0 and total_step != 0:
-            model.eval()
-            with torch.no_grad():
-                for idx, (input, img_name, img_path, last_img_path) in enumerate(test_queue):
-                    model.is_new_seq = utils.sequential_judgment(img_path[0], last_img_path[0])
-                    if model.is_new_seq:
-                        print("Eval Get this img from: ", img_path, "\n Last img from: ", last_img_path)
-                    input = Variable(input, volatile=True).cuda()
-                    L_pred1,L_pred2,L2,s2,s21,s22,H2,H11,H12,H13,s13,H14,s14,H3,s3,H3_pred,H4_pred,L_pred1_L_pred2_diff,H3_denoised1_H3_denoised2_diff,H2_blur,H3_blur,H3_denoised1,H3_denoised2= model(input, img_path[0])
-                    input_name = '%s_%s' % (os.path.basename(os.path.split(img_path[0])[0]), img_name[0])
-                    H3_img = save_images(H3)
-                    H2_img = save_images(H2)
-                    os.makedirs(args.save + '/result/denoise/', exist_ok=True)
-                    os.makedirs(args.save + '/result/enhance/', exist_ok=True)
-                    Image.fromarray(H3_img).save(args.save + '/result/denoise/' + input_name+'_denoise_'+str(epoch)+'.png', 'PNG')
-                    Image.fromarray(H2_img).save(args.save + '/result/enhance/' +input_name+'_enhance_'+str(epoch)+'.png', 'PNG')
+        # if epoch % 1 == 0 and total_step != 0:
+        #     model.eval()
+        #     with torch.no_grad():
+        #         for idx, (input, img_name, img_path, last_img_path) in enumerate(test_queue):
+        #             model.is_new_seq = utils.sequential_judgment(img_path[0], last_img_path[0])
+        #             if model.is_new_seq:
+        #                 print("Eval Get this img from: ", img_path, "\n Last img from: ", last_img_path)
+        #             input = Variable(input, volatile=True).cuda()
+        #             L_pred1,L_pred2,L2,s2,s21,s22,H2,H11,H12,H13,s13,H14,s14,H3,s3,H3_pred,H4_pred,L_pred1_L_pred2_diff,H3_denoised1_H3_denoised2_diff,H2_blur,H3_blur,H3_denoised1,H3_denoised2= model(input, img_path[0])
+        #             input_name = '%s_%s' % (os.path.basename(os.path.split(img_path[0])[0]), img_name[0])
+        #             H3_img = save_images(H3)
+        #             H2_img = save_images(H2)
+        #             os.makedirs(args.save + '/result/denoise/', exist_ok=True)
+        #             os.makedirs(args.save + '/result/enhance/', exist_ok=True)
+        #             Image.fromarray(H3_img).save(args.save + '/result/denoise/' + input_name+'_denoise_'+str(epoch)+'.png', 'PNG')
+        #             Image.fromarray(H2_img).save(args.save + '/result/enhance/' +input_name+'_enhance_'+str(epoch)+'.png', 'PNG')
 
 
 if __name__ == '__main__':

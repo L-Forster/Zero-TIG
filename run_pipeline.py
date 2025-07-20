@@ -109,6 +109,8 @@ def main():
         ]
         if args.of_model_path: train_cmd.extend(['--of_model_path', args.of_model_path])
         if args.of_model_name: train_cmd.extend(['--of_model_name', args.of_model_name])
+        if args.of_model_path_bwd: train_cmd.extend(['--of_model_path_bwd', args.of_model_path_bwd])
+        if args.of_model_name_bwd: train_cmd.extend(['--of_model_name_bwd', args.of_model_name_bwd])
 
         if not run_command(train_cmd, logger):
             logger.error("Full dataset training failed. Exiting.")
@@ -136,6 +138,8 @@ def main():
         ]
         if args.of_model_path: eval_cmd.extend(['--of_model_path', args.of_model_path])
         if args.of_model_name: eval_cmd.extend(['--of_model_name', args.of_model_name])
+        if args.of_model_path_bwd: eval_cmd.extend(['--of_model_path_bwd', args.of_model_path_bwd])
+        if args.of_model_name_bwd: eval_cmd.extend(['--of_model_name_bwd', args.of_model_name_bwd])
 
         if not run_command(eval_cmd, logger):
             logger.error("Evaluation of the single model failed.")
