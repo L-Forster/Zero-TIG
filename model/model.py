@@ -300,7 +300,7 @@ class Network(nn.Module):
         flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model)
         mask_fwd = self._get_occlusion_mask(flow_fwd, flow_fwd_bwd)
         warped_H3_fwd, _ = warp_tensor(flow_fwd, last_H3, L2)
-        warped_s3_fwd, _ = warp_tensor(flow_fwd, last_s3, torch.zeros_like(L2))
+        warped_s3_fwd, _ = warp_tensor(flow_fwd, last_s3, L2)
 
         # Backward warp (t+1 -> t) if possible
         if self.use_bidirectional_warp:
@@ -327,11 +327,10 @@ class Network(nn.Module):
                     w_bwd = confidence_bwd / total_confidence
 
                     blended_H3 = w_fwd * warped_H3_fwd + w_bwd * warped_H3_bwd
-                    blended_s3 = w_fwd * warped_s3_fwd
 
                     is_occluded = (confidence_fwd + confidence_bwd < self.fusion_confidence_threshold).float()
                     final_H3 = blended_H3 * (1 - is_occluded) + L2 * is_occluded
-                    final_s3 = blended_s3 * (1 - is_occluded)
+                    final_s3 = warped_s3_fwd
 
                     return final_H3, final_s3
                 except Exception:
@@ -522,7 +521,7 @@ class Finetunemodel(nn.Module):
         flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model)
         mask_fwd = self._get_occlusion_mask(flow_fwd, flow_fwd_bwd)
         warped_H3_fwd, _ = warp_tensor(flow_fwd, last_H3, L2)
-        warped_s3_fwd, _ = warp_tensor(flow_fwd, last_s3, torch.zeros_like(L2))
+        warped_s3_fwd, _ = warp_tensor(flow_fwd, last_s3, L2)
 
         # 2. Backward warp (t+1 -> t) if possible
         if self.use_bidirectional_warp:
@@ -552,12 +551,11 @@ class Finetunemodel(nn.Module):
                     w_bwd = confidence_bwd / total_confidence
 
                     blended_H3 = w_fwd * warped_H3_fwd + w_bwd * warped_H3_bwd
-                    blended_s3 = w_fwd * warped_s3_fwd
 
                     is_occluded = (confidence_fwd + confidence_bwd < self.fusion_confidence_threshold).float()
                     
-                    final_H3 = blended_H3 * (1 - is_occluded) + L2 * is_occluded
-                    final_s3 = blended_s3 * (1 - is_occluded)
+                    final_H3 = blended_H3 * (1 - is_occluded) + warped_H3_fwd * is_occluded
+                    final_s3 = warped_s3_fwd
 
                     return final_H3, final_s3
                 except Exception:
