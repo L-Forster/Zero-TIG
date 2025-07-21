@@ -3,16 +3,21 @@
 
 ### Finetuning optical flow models on synthetic noise.
 - Contains scripts for finetuning optical flow models with synthetic noise on the Sintel dataset.
-1. *train_noisy_dpflow.py* DPFlow (Forward flow) - Simulates denoising process of I(t-1) based on the illumination channel, and I(t) using Gaussian blur, simulating the denoising kernel
-2. *train_noisy_dpflow_bwd.py* DPFlow (Backward flow) - Both I(t) and I(t+1) are processed the same as I(t) above.
-3. *train_noisy_raft.py* RAFT (Forward flow) - Same as (1) with RAFT model.
+1. `finetune_of_noise/train_noisy_dpflow.py` DPFlow (Forward flow) - Simulates denoising process of I(t-1) based on the illumination channel, and I(t) using Gaussian blur, simulating the denoising kernel
+2. `finetune_of_noise/train_noisy_dpflow_bwd.py` DPFlow (Backward flow) - Both I(t) and I(t+1) are processed the same way that I(t) is above.
+3. `finetune_of_noise/train_noisy_raft.py RAFT` (Forward flow) - Same as (1) with RAFT model.
 
 ### Bidirectional Image Warping
 ```model.py```
 
 #### CHANGES:
 - **Forward-backward temporal consistency:** Pixels that do not appear in both forward and backward warping of a frame are added to occlusion map. 
-- **Bidirectional optical flow:** Calculates optical flow for I(t-1)->I(t) and I(t+1)->I(t), then uses the calculated occluded regions to blend together a best estimate for the warped image. 
+- **Bidirectional optical flow:** Calculates optical flow for I(t-1)->I(t) and I(t+1)->I(t), then uses the calculated occluded regions to blend together a best estimate for the warped image. If a region is occluded in both directions, it falls back to L2.
+
+
+### Optical flow & warping visualisation for all models
+`demo.py`
+
 
 
 ### Running the scripts
@@ -52,7 +57,7 @@ Training Noisy optical flow mdoels:
 
 General:
  - Epochs (trained: 5)
- - Changing loss fucntion: I found that the loss was not reflecting the model metrics (especially the PSNR)
+ - Changing loss fucntion: *I found that the loss was not reflecting the model metrics (especially the PSNR)*
 
 
 
