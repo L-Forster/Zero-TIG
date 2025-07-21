@@ -18,7 +18,7 @@ Residual (MSE) for dpflow: 2.9417	Residual (MSE) for dpflow_finetuned: 2.7472			
 
 #### CHANGES:
 - **Forward-backward temporal consistency:** Pixels that do not appear in both forward and backward warping of a frame are added to occlusion map. 
-- **Bidirectional optical flow:** Calculates optical flow for I(t-1)->I(t) and I(t+1)->I(t), then uses the calculated occluded regions to blend together a best estimate for the warped image. If a region is occluded in both directions, it falls back to L2.
+- **Bidirectional optical flow:** Calculates optical flow for I(t-1)->I(t) and I(t+1)->I(t) using the respective finetuned DPFlow models, then uses the calculated occluded regions to blend together a best estimate for the warped image. If a region is occluded in both directions, it falls back to L2.
 
 
 ### Optical flow & warping visualisation for all models
