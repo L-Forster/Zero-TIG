@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from loss import LossFunction, TextureDifference
 from utils.utils import blur, pair_downsampler, viz, warp_tensor, InputPadder
-import ptlflow
+from model.RAFT.raft import RAFT
 from torchvision.transforms.functional import equalize
 import torch.nn.functional as F
 import numpy as np
@@ -103,17 +103,16 @@ class Network(nn.Module):
         self.is_new_seq = True
 
         # optical flow
-        self.dpflow = self.load_dpflow(args)
+        self.raft = self.load_raft(args)
         self.of_scale = args.of_scale
 
-    def load_dpflow(self, args):
-        # Load DPFlow model from ptlflow
-        model_name = getattr(args, 'dpflow_model', 'dpflow')
-        dpflow = ptlflow.get_model(model_name)
-        dpflow.eval()
-        for param in dpflow.parameters():
+    def load_raft(self, args):
+        # Load RAFT model
+        raft = RAFT(args)
+        raft.eval()
+        for param in raft.parameters():
             param.requires_grad = False
-        return dpflow
+        return raft
 
     def cvt_ts2np(self, t):
         # convert tensor to array
@@ -236,19 +235,14 @@ class Network(nn.Module):
         L2_tmp = L2_tmp.to(torch.float32) #/ 255.0
 
         # 2. OF last->this
-        # last_H3_tmp, L2_tmp = self.padder.pad(last_H3_tmp, L2_tmp) # [640, 360]
+        # Ensure RAFT model is on the same device as the inputs
+        self.raft = self.raft.to(L2.device)
+        self.raft.eval()  # Ensure model is in eval mode
         
-        # Ensure dpflow model is on the same device as the inputs
-        self.dpflow = self.dpflow.to(L2.device)
-        self.dpflow.eval()  # Ensure model is in eval mode
-        
-        # Use ptlflow forward method with correct input format
+        # Use RAFT forward method
         with torch.no_grad():
-            # Stack images along batch dimension for ptlflow input format
-            images_tensor = torch.stack([last_H3_tmp[0], L2_tmp[0]], dim=0).unsqueeze(0)  # [1, 2, C, H, W]
-            inputs = {'images': images_tensor}
-            outputs = self.dpflow(inputs)
-            flow_up = outputs['flows'][-1]
+            # RAFT expects [B, C, H, W] format for each image
+            _, flow_up = self.raft(last_H3_tmp, L2_tmp, iters=12, test_mode=True)
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp
@@ -289,18 +283,17 @@ class Finetunemodel(nn.Module):
         self.is_new_seq = True
 
         # optical flow
-        self.dpflow = self.load_dpflow(args)
+        self.raft = self.load_raft(args)
         self.of_scale = args.of_scale
 
 
-    def load_dpflow(self, args):
-        # Load DPFlow model from ptlflow
-        model_name = getattr(args, 'dpflow_model', 'dpflow')
-        dpflow = ptlflow.get_model(model_name)
-        dpflow.eval()
-        for param in dpflow.parameters():
+    def load_raft(self, args):
+        # Load RAFT model
+        raft = RAFT(args)
+        raft.eval()
+        for param in raft.parameters():
             param.requires_grad = False
-        return dpflow
+        return raft
 
 
     def cvt_ts2np(self, t):
@@ -367,19 +360,14 @@ class Finetunemodel(nn.Module):
         L2_tmp = L2_tmp.to(torch.float32)  # / 255.0
 
         # 2. OF last->this
-        # last_H3_tmp, L2_tmp = self.padder.pad(last_H3_tmp, L2_tmp) # [640, 360]
+        # Ensure RAFT model is on the same device as the inputs
+        self.raft = self.raft.to(L2.device)
+        self.raft.eval()  # Ensure model is in eval mode
         
-        # Ensure dpflow model is on the same device as the inputs
-        self.dpflow = self.dpflow.to(L2.device)
-        self.dpflow.eval()  # Ensure model is in eval mode
-        
-        # Use ptlflow forward method with correct input format
+        # Use RAFT forward method
         with torch.no_grad():
-            # Stack images along batch dimension for ptlflow input format
-            images_tensor = torch.stack([last_H3_tmp[0], L2_tmp[0]], dim=0).unsqueeze(0)  # [1, 2, C, H, W]
-            inputs = {'images': images_tensor}
-            outputs = self.dpflow(inputs)
-            flow_up = outputs['flows'][-1]
+            # RAFT expects [B, C, H, W] format for each image
+            _, flow_up = self.raft(last_H3_tmp, L2_tmp, iters=12, test_mode=True)
         # viz(last_H3_tmp, flow_up)
 
         # 3. Warp

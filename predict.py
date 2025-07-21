@@ -31,7 +31,6 @@ parser.add_argument('--model_pretrain', type=str,
                     help='location of the data corpus')
 parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
 parser.add_argument('--seed', type=int, default=2, help='random seed')
-parser.add_argument('--dpflow_model', type=str, default='dpflow', help='DPFlow model name for optical flow')
 parser.add_argument('--of_scale', type=int, default=3, help='downscale size when compute OF')
 parser.add_argument('--dataset', type=str, default='RLV', help='Specified data set')
 parser.add_argument('--num_workers', type=int, default=0, help='number of dataloader workers')
