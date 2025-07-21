@@ -7,6 +7,10 @@
 2. `finetune_of_noise/train_noisy_dpflow_bwd.py` DPFlow (Backward flow) - Both I(t) and I(t+1) are processed the same way that I(t) is above.
 3. `finetune_of_noise/train_noisy_raft.py RAFT` (Forward flow) - Same as (1) with RAFT model.
 
+Example output flow map:
+<img width="1676" height="325" alt="image" src="https://github.com/user-attachments/assets/c908beb1-b262-40f3-8ccf-d7f7c5d68b70" />
+- Noisy version more accurately can identify the foreground in a lowlight environment
+
 ### Bidirectional Image Warping
 ```model.py```
 
