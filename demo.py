@@ -7,15 +7,15 @@ import glob
 import numpy as np
 import torch
 from PIL import Image
-
-sys.path.append('core')
-
-# Import models
 from model.RAFT.raft import RAFT
 import ptlflow
 from utils import flow_viz
 from utils.utils import InputPadder
 from ptlflow.utils.io_adapter import IOAdapter
+
+sys.path.append('core')
+
+
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -33,17 +33,13 @@ def load_raft_model(checkpoint_path):
     return model
 
 def load_dpflow_model(checkpoint_path=None):
-    """Load DPFlow model using ptlflow, with optional custom weights."""
     if checkpoint_path:
         print(f"Loading custom DPFlow weights from: {checkpoint_path}")
-        # Get the model architecture without loading any pretrained weights first
         model = ptlflow.get_model('dpflow', ckpt_path=None)
-        # Our custom weights file is a clean state_dict, so we can load it directly.
         custom_state_dict = torch.load(checkpoint_path, map_location=torch.device(DEVICE))
         model.load_state_dict(custom_state_dict)
     else:
         print("Loading default 'things' pretrained DPFlow model.")
-        # 'things' is the ptlflow keyword for the default pretrained weights.
         model = ptlflow.get_model('dpflow', ckpt_path='things')
 
     model.to(DEVICE)
@@ -51,24 +47,18 @@ def load_dpflow_model(checkpoint_path=None):
     return model
 
 def load_image(imfile):
-    """Load and preprocess image for optical flow."""
     img = np.array(Image.open(imfile)).astype(np.uint8)
     img = cv2.resize(img, [640, 360])  # Standard size for flow computation
     img = torch.from_numpy(img).permute(2, 0, 1).float()
     return img[None].to(DEVICE)
 
 def save_flow_visualization(flow, output_path):
-    """Save optical flow as color-coded visualization."""
     flow_np = flow[0].permute(1, 2, 0).cpu().numpy()
     flow_color = flow_viz.flow_to_image(flow_np)
-    # Increase brightness by 50%
     flow_color = cv2.convertScaleAbs(flow_color, alpha=2.0, beta=0)
-    
-    # Convert RGB to BGR for OpenCV
     cv2.imwrite(output_path, flow_color[:, :, [2, 1, 0]])
 
 def save_warped_image(image, flow, output_path):
-    """Warp image with flow and save it."""
     image_np = image[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
     flow_np = flow[0].permute(1, 2, 0).cpu().numpy()
 
@@ -80,14 +70,11 @@ def save_warped_image(image, flow, output_path):
 
     warped_image = cv2.remap(image_np, map1, map2, cv2.INTER_LINEAR)
     
-    # Increase brightness by 50%
     warped_image = cv2.convertScaleAbs(warped_image, alpha=2.0, beta=0)
 
-    # Convert RGB to BGR for OpenCV
     cv2.imwrite(output_path, warped_image[:, :, ::-1])
 
 def compute_flow_raft(model, image1_path, image2_path):
-    """Compute optical flow using RAFT."""
     image1 = np.array(Image.open(image1_path)).astype(np.uint8)
     image2 = np.array(Image.open(image2_path)).astype(np.uint8)
 
@@ -103,13 +90,11 @@ def compute_flow_raft(model, image1_path, image2_path):
     return padder.unpad(flow)
 
 def compute_flow_dpflow(model, image1_path, image2_path):
-    """Compute optical flow using DPFlow."""
     # Load images
     image1 = np.array(Image.open(image1_path)).astype(np.uint8)
     image2 = np.array(Image.open(image2_path)).astype(np.uint8)
     
-    # The IOAdapter expects a list of numpy images.
-    # It will handle resizing, normalization, and conversion to tensor.
+
     io_adapter = IOAdapter(model, image1.shape[:2])
     inputs = io_adapter.prepare_inputs([image1, image2])
 
@@ -120,8 +105,7 @@ def compute_flow_dpflow(model, image1_path, image2_path):
     with torch.no_grad():
         predictions = model(inputs)
         # The output of ptlflow models is a dict with a 'flows' tensor of shape BxNx2xHxW.
-        # N is the number of predictions. We only need one for inference.
-        # Squeeze the N dimension to get Bx2xHxW, which is the format expected by other functions.
+
         flow = predictions['flows'].squeeze(1)
     
     return flow
@@ -199,11 +183,9 @@ def main():
             elif model_name in ['dpflow', 'dpflow_finetuned']:
                 flow = compute_flow_dpflow(models[model_name], img1_path, img2_path)
             elif model_name == 'none':
-                # To get the shape, we need to load the image.
                 h, w, _ = np.array(Image.open(img1_path)).shape
                 flow = create_zero_flow((1, 3, h, w))
             
-            # Save both visualization types
             output_path_flow = f"{output_base_path}_flow.png"
             save_flow_visualization(flow, output_path_flow)
 
@@ -211,9 +193,7 @@ def main():
             image2_for_warp = torch.from_numpy(np.array(Image.open(img2_path)).astype(np.uint8)).permute(2, 0, 1).float()[None].to(DEVICE)
             save_warped_image(image2_for_warp, flow, output_path_warp)
 
-            print(f"  Saved {model_name} outputs to {output_base_path}_<flow|warp>.png")
     
-    print(f"\nComparison complete! Check results in {args.output_dir}")
 
 if __name__ == '__main__':
     main()

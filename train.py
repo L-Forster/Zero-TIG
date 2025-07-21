@@ -27,17 +27,20 @@ parser.add_argument('--dataset', type=str, default='RLV', help='Specified data s
 parser.add_argument('--num_workers', type=int, default=0, help='number of dataloader workers')
 parser.add_argument('--of_model_path', type=str, default=None, help='Path to the optical flow model checkpoint.')
 parser.add_argument('--of_model_name', type=str, default='raft', help='Name of the optical flow model to use.')
-parser.add_argument('--use_self_ensemble', type=lambda x: (str(x).lower() == 'true'), default=True, help='Use self-ensemble module in the model.')
-parser.add_argument('--use_bidirectional_flow', type=lambda x: (str(x).lower() == 'true'), default=True, help='Use bidirectional optical flow for warping.')
-parser.add_argument('--occlusion_threshold', type=float, default=1.0, help='Threshold for occlusion detection in bidirectional flow.')
-parser.add_argument('--flow_consistency_alpha', type=float, default=0.01, help='Alpha parameter for adaptive occlusion threshold.')
+parser.add_argument('--of_model_path_bwd', type=str, default=None, help='Path to the backward optical flow model checkpoint.')
+parser.add_argument('--of_model_name_bwd', type=str, default='raft', help='Name of the backward optical flow model to use.')
+parser.add_argument('--occlusion_threshold', type=float, default=0.5, help='Threshold for forward-backward flow consistency check.')
+parser.add_argument('--flow_consistency_alpha', type=float, default=0.01, help='Alpha parameter for adaptive consistency threshold.')
+parser.add_argument('--fusion_confidence_threshold', type=float, default=0.1, help='Confidence threshold for intelligent fusion fallback.')
+parser.add_argument('--disable_bidirectional_warp', action='store_true', help='If set, disables the bidirectional warping and uses only forward warping.')
+parser.add_argument('--target_sequence', type=str, default=None, help='If specified, only this sequence will be processed from the list.')
 
 args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
 args.save = args.save + '/' + 'Train-{}'.format(time.strftime("%Y%m%d-%H%M%S"))
-utils.create_exp_dir(args.save, scripts_to_save=glob.glob('*.py'))
+utils.create_exp_dir(args.save, scripts_to_save=glob.glob('**/*.py', recursive=True))
 model_path = args.save + '/model_epochs/'
 os.makedirs(model_path, exist_ok=True)
 
@@ -90,30 +93,16 @@ def main():
     model.enhance.out_conv.apply(model.enhance_weights_init)
 
     try:
-        base_weights = torch.load(args.model_pretrain, map_location='cuda:0')
+        base_weights = torch.load(args.model_pretrain)
         pretrained_dict = base_weights
-
-        new_pretrained_dict = {}
-        for k, v in pretrained_dict.items():
-            if k.startswith('denoise_1.') or k.startswith('denoise_2.'):
-                parts = k.split('.', 1)
-                if len(parts) == 2:
-                    new_k = f'{parts[0]}.model.{parts[1]}'
-                    new_pretrained_dict[new_k] = v
-                else:
-                    # Handle cases where the key might not have a dot
-                    new_pretrained_dict[k] = v
-            else:
-                new_pretrained_dict[k] = v
-        pretrained_dict = new_pretrained_dict
-
         model_dict = model.state_dict()
         pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
         model_dict.update(pretrained_dict)
         model.load_state_dict(model_dict)
         logging.info('Loaded pre-trained model from %s.' % args.model_pretrain)
-    except Exception as e:
-        logging.info('Model is initialized without pre-trained model: %s', e)
+    except:
+        logging.info('Model is initialized without pre-trained model.')
+
 
     model = model.cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=3e-4)
@@ -123,15 +112,15 @@ def main():
     # Dataset
     TrainDataset = CreateDataset(args, task='train')
     logging.info("Training data: %d", TrainDataset.__len__())
-    TestDataset = CreateDataset(args, task='test')
-    logging.info("Test data: %d", TestDataset.__len__())
+    # TestDataset = CreateDataset(args, task='test')
+    # logging.info("Test data: %d", TestDataset.__len__())
 
     train_queue = torch.utils.data.DataLoader(
         TrainDataset, batch_size=args.batch_size,
         pin_memory=True, num_workers=args.num_workers, shuffle=False, generator=torch.Generator(device='cuda'))
-    test_queue = torch.utils.data.DataLoader(
-        TestDataset, batch_size=1,
-        pin_memory=True, num_workers=args.num_workers, shuffle=False, generator=torch.Generator(device='cuda'))
+    # test_queue = torch.utils.data.DataLoader(
+    #     TestDataset, batch_size=1,
+    #     pin_memory=True, num_workers=args.num_workers, shuffle=False, generator=torch.Generator(device='cuda'))
 
     total_step = 0
     model.train()
@@ -146,7 +135,7 @@ def main():
             input = Variable(input, requires_grad=False).cuda()
             optimizer.zero_grad()
             optimizer.param_groups[0]['capturable'] = True
-            loss = model._loss(input)
+            loss = model._loss(input, img_path[0])
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 5)
             optimizer.step()
@@ -155,22 +144,22 @@ def main():
         logging.info('train-epoch %03d %f', epoch, np.average(losses))
         utils.save(model, os.path.join(model_path, 'weights_%d.pt' % epoch))
 
-        if epoch % 1 == 0 and total_step != 0:
-            model.eval()
-            with torch.no_grad():
-                for idx, (input, img_name, img_path, last_img_path) in enumerate(test_queue):
-                    model.is_new_seq = utils.sequential_judgment(img_path[0], last_img_path[0])
-                    if model.is_new_seq:
-                        print("Eval Get this img from: ", img_path, "\n Last img from: ", last_img_path)
-                    input = Variable(input, volatile=True).cuda()
-                    L_pred1,L_pred2,L2,s2,s21,s22,H2,H11,H12,H13,s13,H14,s14,H3,s3,H3_pred,H4_pred,L_pred1_L_pred2_diff,H3_denoised1_H3_denoised2_diff,H2_blur,H3_blur,H3_denoised1,H3_denoised2= model(input)
-                    input_name = '%s_%s' % (os.path.basename(os.path.split(img_path[0])[0]), img_name[0])
-                    H3_img = save_images(H3)
-                    H2_img = save_images(H2)
-                    os.makedirs(args.save + '/result/denoise/', exist_ok=True)
-                    os.makedirs(args.save + '/result/enhance/', exist_ok=True)
-                    Image.fromarray(H3_img).save(args.save + '/result/denoise/' + input_name+'_denoise_'+str(epoch)+'.png', 'PNG')
-                    Image.fromarray(H2_img).save(args.save + '/result/enhance/' +input_name+'_enhance_'+str(epoch)+'.png', 'PNG')
+        # if epoch % 1 == 0 and total_step != 0:
+        #     model.eval()
+        #     with torch.no_grad():
+        #         for idx, (input, img_name, img_path, last_img_path) in enumerate(test_queue):
+        #             model.is_new_seq = utils.sequential_judgment(img_path[0], last_img_path[0])
+        #             if model.is_new_seq:
+        #                 print("Eval Get this img from: ", img_path, "\n Last img from: ", last_img_path)
+        #             input = Variable(input, volatile=True).cuda()
+        #             L_pred1,L_pred2,L2,s2,s21,s22,H2,H11,H12,H13,s13,H14,s14,H3,s3,H3_pred,H4_pred,L_pred1_L_pred2_diff,H3_denoised1_H3_denoised2_diff,H2_blur,H3_blur,H3_denoised1,H3_denoised2= model(input, img_path[0])
+        #             input_name = '%s_%s' % (os.path.basename(os.path.split(img_path[0])[0]), img_name[0])
+        #             H3_img = save_images(H3)
+        #             H2_img = save_images(H2)
+        #             os.makedirs(args.save + '/result/denoise/', exist_ok=True)
+        #             os.makedirs(args.save + '/result/enhance/', exist_ok=True)
+        #             Image.fromarray(H3_img).save(args.save + '/result/denoise/' + input_name+'_denoise_'+str(epoch)+'.png', 'PNG')
+        #             Image.fromarray(H2_img).save(args.save + '/result/enhance/' +input_name+'_enhance_'+str(epoch)+'.png', 'PNG')
 
 
 if __name__ == '__main__':

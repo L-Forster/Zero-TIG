@@ -12,3 +12,4 @@ __pycache__/
 dataloader/__pycache__/
 lightning_logs/
 finetune_of_noise/MPI-Sintel-complete/
+finetune_of_noise/logs/

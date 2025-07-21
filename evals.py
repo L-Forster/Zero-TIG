@@ -18,9 +18,7 @@ from skimage import exposure
 from utils.utils import sequential_judgment
 import json
 
-# Check if CUDA is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-torch.set_default_device(device)
 print("Using device:", device)
 
 parser = argparse.ArgumentParser("ZERO-IG")
@@ -35,18 +33,22 @@ parser.add_argument('--model_pretrain', type=str,
 parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
 parser.add_argument('--seed', type=int, default=2, help='random seed')
 parser.add_argument('--of_scale', type=int, default=3, help='downscale size when compute OF')
+parser.add_argument('--of_model_name', type=str, default='dpflow', help='Name of the optical flow model to use (e.g., \'raft\', \'dpflow\').')
+parser.add_argument('--of_model_path', type=str, default=None, help='Path to a custom optical flow model checkpoint.')
+parser.add_argument('--of_model_path_bwd', type=str, default=None, help='Path to the backward optical flow model checkpoint.')
+parser.add_argument('--of_model_name_bwd', type=str, default='raft', help='Name of the backward optical flow model to use.')
 parser.add_argument('--dataset', type=str, default='RLV', help='Specified data set')
 parser.add_argument('--gain', type=int, default=100, help='OF loss gain')
 parser.add_argument('--name', type=str, default='run', help='A name for the evaluation run, used for log and metric file names.')
-parser.add_argument('--of_model_path', type=str, default=None, help='Path to the optical flow model checkpoint.')
-parser.add_argument('--of_model_name', type=str, default='raft', help='Name of the optical flow model to use.')
-parser.add_argument('--use_self_ensemble', type=lambda x: (str(x).lower() == 'true'), default=True, help='Use self-ensemble module in the model.')
-parser.add_argument('--use_bidirectional_flow', type=lambda x: (str(x).lower() == 'true'), default=True, help='Use bidirectional optical flow for warping.')
-parser.add_argument('--occlusion_threshold', type=float, default=1.0, help='Threshold for occlusion detection in bidirectional flow.')
-parser.add_argument('--flow_consistency_alpha', type=float, default=0.01, help='Alpha parameter for adaptive occlusion threshold.')
-
+parser.add_argument('--occlusion_threshold', type=float, default=0.5, help='Threshold for forward-backward flow consistency check.')
+parser.add_argument('--flow_consistency_alpha', type=float, default=0.01, help='Alpha parameter for adaptive consistency threshold.')
+parser.add_argument('--fusion_confidence_threshold', type=float, default=0.1, help='Confidence threshold for intelligent fusion fallback.')
+parser.add_argument('--disable_bidirectional_warp', action='store_true', help='If set, disables the bidirectional warping and uses only forward warping.')
+parser.add_argument('--target_sequence', type=str, default=None, help='If specified, only this sequence will be processed from the list.')
 
 args = parser.parse_args()
+args.device = device
+
 save_path = args.save
 os.makedirs(save_path, exist_ok=True)
 
@@ -144,7 +146,7 @@ def main():
             gt_img = np.asarray(Image.open(gt_path, mode='r'), dtype=np.float32) / 255.
 
             # inference start from here
-            enhance, output, illum = model(input)
+            enhance, output, illum = model(input, img_path[0])
             # last_H3 = save_images(model.last_H3)
             # Image.fromarray(last_H3).save('./' + input_name + '_denoise_last' + '.png', 'PNG')
             model.update_H3(output, illum)
@@ -188,15 +190,25 @@ def main():
                     cv2.imwrite(os.path.join(save_dir, input_name+'_denoise_hm.png'), save_img)
 
     torch.set_grad_enabled(True)
-    with open(os.path.join(args.save, f'{args.name}_Metrics.json'), 'w') as file:
-        json.dump({
+    
+    # Save metrics JSON file
+    metrics_data = {
                    'Total_PSNR': total_psnr/num_img,
                    'Total_SSIM': total_ssim/num_img,
                    'Total_LPIPS': total_lpips/num_img,
                    'Total_PSNR_HM': total_psnr_hm/num_img,
                    'Total_SSIM_HM': total_ssim_hm/num_img,
-                   'Total_LPIPS_HM': total_lpips_hm/num_img},
-                  file)
+        'Total_LPIPS_HM': total_lpips_hm/num_img
+    }
+    
+    metrics_file_path = os.path.join(args.save, f'{args.name}_Metrics.json')
+    with open(metrics_file_path, 'w') as file:
+        json.dump(metrics_data, file, indent=2)
+    
+    print(f"\n=== EVALUATION COMPLETE ===")
+    print(f"Metrics saved to: {metrics_file_path}")
+    print(f"Images saved to: {args.save}")
+    print(f"Log saved to: {os.path.join(args.save, f'{args.name}.log')}")
 
 
 if __name__ == '__main__':
