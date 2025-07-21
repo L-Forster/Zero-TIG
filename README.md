@@ -11,6 +11,8 @@ Example output flow map:
 <img width="1676" height="325" alt="image" src="https://github.com/user-attachments/assets/c908beb1-b262-40f3-8ccf-d7f7c5d68b70" />
 - Noisy version more accurately can identify the foreground in a lowlight environment
 
+Residual (MSE) for dpflow: 2.9417	Residual (MSE) for dpflow_finetuned: 2.7472						Residual (MSE) for raft: 2.8668
+
 ### Bidirectional Image Warping
 ```model.py```
 
