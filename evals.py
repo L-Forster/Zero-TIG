@@ -18,9 +18,7 @@ from skimage import exposure
 from utils.utils import sequential_judgment
 import json
 
-# Check if CUDA is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# --- REMOVED torch.set_default_device(device) ---
 print("Using device:", device)
 
 parser = argparse.ArgumentParser("ZERO-IG")

@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Training script for fine-tuning optical flow models for BACKWARD FLOW (I(t+1) -> I(t))
-on noisy-to-noisy environments, using generated backward flow ground truth.
-"""
-
 import os
 from datetime import datetime
 import torch
@@ -11,11 +5,9 @@ import torch.nn as nn
 import numpy as np
 import types
 from typing import Dict, Any, Optional
-
 from loguru import logger
 from lightning.pytorch.callbacks import Callback, EarlyStopping
 from torchvision.transforms.functional import equalize, gaussian_blur
-
 from noise import generate_noise, reshape_noise_params
 from ptlflow.data.flow_datamodule import FlowDataModule
 from ptlflow.utils.lightning.ptlflow_trainer import PTLFlowTrainer
@@ -23,7 +15,6 @@ import ptlflow
 
 
 class PrintLossCallback(Callback):
-    """A callback to print the training loss at each step."""
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         if 'loss' in outputs:
             loss = outputs['loss'].item()
@@ -31,7 +22,6 @@ class PrintLossCallback(Callback):
 
 
 class SaveWeightsOnlyCallback(Callback):
-    """A callback to save only the model weights at the end of training."""
     def __init__(self, training_args: Dict[str, Any]):
         super().__init__()
         self.training_args = training_args
@@ -50,10 +40,7 @@ class SaveWeightsOnlyCallback(Callback):
 
 
 class NoisyFlowDataModule(FlowDataModule):
-    """
-    This class is now adapted to generate backward flow data from forward flow,
-    and apply identical "noisy" preprocessing to both frames in a pair.
-    """
+
     def __init__(
         self,
         noise_model: str = "starlight",
@@ -101,10 +88,7 @@ class NoisyFlowDataModule(FlowDataModule):
         return batch
 
     def _process_as_noisy(self, frame_clean: torch.Tensor) -> torch.Tensor:
-        """
-        This function contains the EXACT preprocessing logic from your reference script
-        for what you called a "pseudo L2" frame.
-        """
+
         B, C, H, W = frame_clean.shape
         device = frame_clean.device
 
@@ -119,10 +103,10 @@ class NoisyFlowDataModule(FlowDataModule):
             noisy_img_norm = generate_noise(frame_norm, noise_dict, self.noise_model, num_frames=1, device=device)
             noisy_img = noisy_img_norm * 255.0 if scaled else noisy_img_norm
         
-        # Gaussian blur is used to simulate the effect of the main model's Denoise_1 module.
+        # Gaussian blur is used to simulate the effect of the main model's kernel.
         denoised_img = gaussian_blur(noisy_img, kernel_size=5, sigma=1.5)
         
-        # Apply Histogram Equalization
+        # Apply Histogram Equalisation
         equalized_img = torch.zeros_like(denoised_img)
         for b in range(B):
             img_uint8 = denoised_img[b].clamp(0, 255).to(torch.uint8)
@@ -139,7 +123,6 @@ class NoisyFlowDataModule(FlowDataModule):
         if images is None or forward_flow is None:
             return batch
 
-        # The dataloader gives a pair of frames.
         if images.dim() == 4: images = images.unsqueeze(1)
         B, N, C, H, W = images.shape
         assert N == 2, "This logic requires a pair of frames."
@@ -151,7 +134,6 @@ class NoisyFlowDataModule(FlowDataModule):
         processed_t = self._process_as_noisy(img_t)
         processed_t_plus_1 = self._process_as_noisy(img_t_plus_1)
 
-        # Reverse the image order for the model input
         new_imgs = torch.stack([processed_t_plus_1, processed_t], dim=1)
         # Generate the backward flow ground truth by negating the forward flow
         backward_flow = -forward_flow
@@ -163,7 +145,6 @@ class NoisyFlowDataModule(FlowDataModule):
 
 
 def main():
-    """Main function to run the noisy fine-tuning for backward flow."""
     log_dir = "finetune_of_noise/logs"
     os.makedirs(log_dir, exist_ok=True)
     log_file_path = os.path.join(log_dir, f"train_noisy_backward_{datetime.now().strftime('%Y%m%d-%H%M%S')}.log")
@@ -199,7 +180,6 @@ def main():
             h = (1 - z) * h + z * q if z is not None else h
             return h
         _DPConvGRU.forward, _DPCGUGRU.forward = _safe_cat_forward, _safe_cat_forward
-        logger.info("--- Applied ConvGRU size-mismatch monkey-patch ---")
     except Exception as e:
         logger.warning(f"Failed to patch ConvGRU for size mismatches: {e}")
 
@@ -220,7 +200,6 @@ def main():
     datamodule.sintel_dstype = args["sintel_dstype"]
     
     def _patched_load_dataset_paths(self):
-        logger.info("--- Applying monkey-patch to populate dataset_paths ---")
         self.dataset_paths = {'sintel': self.sintel_root_dir}
     datamodule._load_dataset_paths = types.MethodType(_patched_load_dataset_paths, datamodule)
 

@@ -92,7 +92,6 @@ def main():
 
     
     if not args.target_sequence:
-        logger.info(f"--- BATCH MODE: Training ONE model on all sequences from {args.list_file} ---")
         
         train_base_dir = os.path.join(args.base_exp_dir, 'training_full_dataset')
         os.makedirs(train_base_dir, exist_ok=True)
@@ -147,7 +146,6 @@ def main():
             logger.info(f"Evaluation complete. Reports saved in {eval_save_dir}")
 
     else:
-        logger.info(f"--- PER-SEQUENCE MODE: Training a new model for each sequence ---")
         
         if args.target_sequence:
             sequence_name = args.target_sequence
@@ -170,7 +168,6 @@ def main():
 
         all_metrics = []
         for seq in sequences:
-            logger.info(f"========== PROCESSING SEQUENCE: {seq} ==========")
             
             safe_seq_name = seq.replace('/', '_').replace('\\', '_').strip('_')
             eval_save_dir = os.path.join(args.base_exp_dir, safe_seq_name, 'evaluation')

@@ -10,8 +10,8 @@ from PIL import Image
 import torch.nn.functional as F
 import numpy as np
 import cv2
+
 print("CUDA_VISIBLE_DEVICES:", os.environ.get("CUDA_VISIBLE_DEVICES"))
-# --- UNCHANGED MODULES ---
 
 class Denoise_1(nn.Module):
     def __init__(self, chan_embed=48):
@@ -68,7 +68,6 @@ class Enhancer(nn.Module):
         fea = self.out_conv(fea)
         return torch.clamp(fea, 0.0001, 1)
 
-# --- NETWORK WITH BIDIRECTIONAL WARPING IMPLEMENTED ---
 
 class Network(nn.Module):
 
@@ -109,7 +108,6 @@ class Network(nn.Module):
         self.fusion_confidence_threshold = getattr(args, 'fusion_confidence_threshold', 0.1)
 
     def load_optical_flow_model(self, args, model_name='raft', model_path=None):
-        """Loads an optical flow model (UNCHANGED)."""
         if model_path and model_path.lower() != "raft":
             model = ptlflow.get_model(model_name)
             ckpt = torch.load(model_path, map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
@@ -135,7 +133,6 @@ class Network(nn.Module):
             param.requires_grad = False
         return model
 
-    # --- Other helper methods (unchanged) ---
     def cvt_ts2np(self, t):
         t = t.detach()
         n = t.squeeze().permute((1, 2, 0)).cpu().numpy()
@@ -224,8 +221,6 @@ class Network(nn.Module):
 
     def _loss(self, input, img_path=None):
         outputs = self(input, img_path)
-        # The forward pass returns 23 values, but the loss function only expects 21 of them.
-        # We must exclude the last two (H3_denoised1, H3_denoised2)
         loss = self._criterion(input, *outputs[:-2])
         self.update_H3(outputs[13], outputs[14]) # H3 and s3
         return loss
@@ -234,14 +229,11 @@ class Network(nn.Module):
         self.last_H3 = H3.detach()
         self.last_s3 = s3.detach()
 
-    # --- NEW HELPER METHODS FOR BIDIRECTIONAL FLOW ---
     def _load_frame(self, path):
-        """Loads a frame from a path and converts it to a tensor."""
         image = Image.open(path).convert('RGB')
         return to_tensor(image).unsqueeze(0).to(self.last_H3.device)
 
     def _compute_single_flow(self, img1, img2, model):
-        """Computes flow from img1->img2 using the provided model."""
         with torch.no_grad():
             ht_org, wd_org = img1.shape[-2:]
             ht, wd = ht_org // self.of_scale, wd_org // self.of_scale
@@ -274,13 +266,11 @@ class Network(nn.Module):
             return flow_up
 
     def _compute_bidirectional_flow(self, img1, img2, model):
-        """Computes flow img1->img2 and img2->img1 using the same model."""
         flow_fwd = self._compute_single_flow(img1, img2, model)
         flow_bwd = self._compute_single_flow(img2, img1, model)
         return flow_fwd, flow_bwd
 
     def _get_occlusion_mask(self, flow_fwd, flow_bwd):
-        """Calculates an occlusion mask based on forward-backward consistency."""
         warped_flow_bwd, _ = warp_tensor(flow_fwd, flow_bwd, flow_bwd)
         
         flow_diff = flow_fwd + warped_flow_bwd
@@ -293,9 +283,7 @@ class Network(nn.Module):
         return occlusion_mask
 
     def update_cache(self, last_H3, last_s3, L2, img_path):
-        """
-        Updates cache with consistency-checked, intelligently-fused bidirectional warping.
-        """
+
         # Forward warp (t-1 -> t)
         flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model)
         mask_fwd = self._get_occlusion_mask(flow_fwd, flow_fwd_bwd)
@@ -380,7 +368,6 @@ class Finetunemodel(nn.Module):
         self.fusion_confidence_threshold = getattr(args, 'fusion_confidence_threshold', 0.1)
 
     def load_optical_flow_model(self, args, model_name='raft', model_path=None):
-        """Loads an optical flow model (UNCHANGED)."""
         if model_path is None:
             model = ptlflow.get_model(model_name)
         elif model_path.lower() != "raft":
@@ -425,7 +412,6 @@ class Finetunemodel(nn.Module):
         L2 = input - L2_noise
         L2 = torch.clamp(L2, eps, 1)
 
-        """ concat output from last frm"""
         if self.is_new_seq:
             self.last_H3_wp = torch.zeros_like(L2)
             self.last_s3_wp = torch.zeros_like(L2)
@@ -436,9 +422,6 @@ class Finetunemodel(nn.Module):
         H2 = input / s2
         H2 = torch.clamp(H2, eps, 1)
 
-        # if self.is_new_seq:
-        #     self.last_H3_wp = H2.detach()
-        #     self.last_s3_wp = H2.detach()
 
         denoise2_input = torch.cat([self.last_H3_wp, self.last_s3_wp, H2, s2], 1)
         denoise2_subtract_input = torch.cat([H2, s2], 1).detach()
@@ -455,14 +438,11 @@ class Finetunemodel(nn.Module):
         self.last_H3 = H3.detach()
         self.last_s3 = s3.detach()
         
-    # --- COPY THE IDENTICAL HELPER AND UPDATE_CACHE METHODS HERE ---
     def _load_frame(self, path):
-        """Loads a frame from a path and converts it to a tensor."""
         image = Image.open(path).convert('RGB')
         return to_tensor(image).unsqueeze(0).to(self.last_H3.device)
 
     def _compute_single_flow(self, img1, img2, model):
-        """Computes flow from img1->img2 using the provided model."""
         with torch.no_grad():
             ht_org, wd_org = img1.shape[-2:]
             ht, wd = ht_org // self.of_scale, wd_org // self.of_scale
@@ -495,13 +475,11 @@ class Finetunemodel(nn.Module):
             return flow_up
 
     def _compute_bidirectional_flow(self, img1, img2, model):
-        """Computes flow img1->img2 and img2->img1 using the same model."""
         flow_fwd = self._compute_single_flow(img1, img2, model)
         flow_bwd = self._compute_single_flow(img2, img1, model)
         return flow_fwd, flow_bwd
 
     def _get_occlusion_mask(self, flow_fwd, flow_bwd):
-        """Calculates an occlusion mask based on forward-backward consistency."""
         warped_flow_bwd, _ = warp_tensor(flow_fwd, flow_bwd, flow_bwd)
         
         flow_diff = flow_fwd + warped_flow_bwd
@@ -514,16 +492,13 @@ class Finetunemodel(nn.Module):
         return occlusion_mask
     
     def update_cache(self, last_H3, last_s3, L2, img_path):
-        """
-        Updates cache with consistency-checked, intelligently-fused bidirectional warping.
-        """
-        # 1. Forward warp (t-1 -> t)
+        # Forward warp (t-1 -> t)
         flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model)
         mask_fwd = self._get_occlusion_mask(flow_fwd, flow_fwd_bwd)
         warped_H3_fwd, _ = warp_tensor(flow_fwd, last_H3, L2)
         warped_s3_fwd, _ = warp_tensor(flow_fwd, last_s3, L2)
 
-        # 2. Backward warp (t+1 -> t) if possible
+        # Backward warp (t+1 -> t) if possible
         if self.use_bidirectional_warp:
             next_frame_path = get_next_frame_path(img_path)
             if next_frame_path:

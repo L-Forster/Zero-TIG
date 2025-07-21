@@ -1,12 +1,3 @@
-#!/usr/bin/env python3
-"""
-Fine-tune RAFT on data that perfectly mimics the enhancement network's inputs.
-
-This script simulates the data format used in the main neural network to 
-achieve the best possible performance by closing the domain gap. It generates a 
-pseudo-reflectance map (last_H3) and a pseudo-denoised, equalized 
-illumination map (L2) for fine-tuning the RAFT model.
-"""
 
 import os
 from datetime import datetime
@@ -25,9 +16,7 @@ from noise import generate_noise, reshape_noise_params
 from ptlflow.data.flow_datamodule import FlowDataModule
 from ptlflow.utils.lightning.ptlflow_trainer import PTLFlowTrainer
 
-# -----------------------------------------------------------------------------
-#  Callbacks (Unchanged)
-# -----------------------------------------------------------------------------
+
 class PrintLossCallback(Callback):
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         if "loss" in outputs:
@@ -49,14 +38,12 @@ class SaveWeightsOnlyCallback(Callback):
         torch.save(pl_module.state_dict(), path)
         logger.info(f"Saved fine-tuned weights to {path}")
 
-# -----------------------------------------------------------------------------
-#  DataModule with Enhancement-Style Data Simulation
-# -----------------------------------------------------------------------------
+
 class EnhancementFlowDataModule(FlowDataModule):
     def __init__(
         self,
         noise_model: str = "starlight",
-        noise_probability: float = 0.8, # Increased probability for more robust training
+        noise_probability: float = 0.8, 
         noise_params_range: Optional[Dict[str, float]] = None,
         val_crop_size: Optional[list] = None,
         **kwargs,
@@ -115,16 +102,11 @@ class EnhancementFlowDataModule(FlowDataModule):
         curr_frame_clean = imgs[:, 1]
         device = imgs.device
 
-        # --- 1. Generate the "pseudo last_H3" from the PREVIOUS frame ---
-        # Rationale: This simulates the texture-rich, illumination-independent
-        # reflectance map (H3) from model.py.
+
         illumination1 = gaussian_blur(prev_frame_clean, kernel_size=21, sigma=10)
-        # --- FIX: Scale to [0, 255] as done in model.py's update_cache ---
         pseudo_h3 = (prev_frame_clean / (illumination1 + 1e-6)).clamp(0, 1.0) * 255.0
 
-        # --- 2. Generate the "pseudo L2" from the CURRENT frame ---
-        # Rationale: This simulates the initial denoised and then equalized
-        # illumination component (L2) from model.py.
+
         noisy_img2 = curr_frame_clean
         if torch.rand(1).item() <= self.noise_probability:
             rows = []
@@ -140,22 +122,15 @@ class EnhancementFlowDataModule(FlowDataModule):
             noisy_img2_norm = generate_noise(curr_frame_norm, noise_dict, self.noise_model, num_frames=1, device=device)
             noisy_img2 = noisy_img2_norm * 255.0 if scaled else noisy_img2_norm
 
-        # Simulate Denoise_1 with a mild blur
         pseudo_l2_denoised = gaussian_blur(noisy_img2, kernel_size=5, sigma=1.5)
         
-        # Apply histogram equalization exactly as in update_cache
         pseudo_l2_equalized = torch.zeros_like(pseudo_l2_denoised)
         for b in range(B):
             frame = pseudo_l2_denoised[b]
             frame_uint8 = frame.clamp(0, 255).to(torch.uint8)
             pseudo_l2_equalized[b] = equalize(frame_uint8).float()
             
-        # --- 3. Replace batch images with the correctly ordered simulated data ---
-        # --- CRITICAL FIX & RATIONALE ---
-        # In model.py, RAFT is called as: `self.of_model(L2_tmp, last_H3_tmp, ...)`
-        # This means the model must be trained to predict flow FROM the equalized
-        # L2 map TO the H3 reflectance map. We stack the tensors in this exact
-        # order to match the inference call.
+
         new_imgs = torch.stack([pseudo_l2_equalized, pseudo_h3], dim=1) # (Current, Previous)
         
         if imgs.dim() == 4: new_imgs = new_imgs.squeeze(1)

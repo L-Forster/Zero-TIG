@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Training script for fine-tuning optical flow models on noisy environments.
-
+Finetuning DPFlow models forward flow on synthetic noisy applied to sintel dataset
 """
 
 import os
@@ -74,7 +73,7 @@ class NoisyFlowDataModule(FlowDataModule):
                     "periodic1": [0.0, 0.6], "periodic2": [0.0, 0.6],
                     "band_noise_angle": [0.0, 1.0],
                 }
-            else:  # eld
+            else:  
                 self.noise_params_range = {
                     "alpha_brightness": [0.1, 0.6], "gamma_brightness": [0.1, 0.6],
                     "shot_noise_log": [0.3, 1.0], "read_noise_scale": [0.3, 0.8],
@@ -101,14 +100,10 @@ class NoisyFlowDataModule(FlowDataModule):
         return batch
 
     def _apply_noise_to_batch(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """
-        This function now generates the specialized (L2 -> H3) data pair
-        to perfectly match the main enhancement network.
-        """
+
         images = batch.get("images", None)
         if images is None: return batch
 
-        # This block ensures we have a tensor of shape [B, 2, C, H, W]
         if images.dim() == 4: images = images.unsqueeze(1)
         B, N, C, H, W = images.shape
         assert N >= 2, "Need at least two frames for flow estimation"
@@ -133,7 +128,7 @@ class NoisyFlowDataModule(FlowDataModule):
             noisy_img2_norm = generate_noise(curr_frame_norm, noise_dict, self.noise_model, num_frames=1, device=device)
             noisy_img2 = noisy_img2_norm * 255.0 if scaled else noisy_img2_norm
 
-        # Gaussian blur is used to simulate the effect of the main model's Denoise_1 module.
+        # Gaussian blur is used to simulate the effect of the main model's Denoise_1 kernel.
         pseudo_l2_denoised = gaussian_blur(noisy_img2, kernel_size=5, sigma=1.5)
         
         pseudo_l2_equalized = torch.zeros_like(pseudo_l2_denoised)
@@ -148,7 +143,6 @@ class NoisyFlowDataModule(FlowDataModule):
         # Stack the images in the correct (L2 -> H3) order
         new_imgs = torch.stack([pseudo_h3_equalized, pseudo_l2_equalized], dim=1)
         
-        # Restore original dimension if it was 4D
         original_shape = images.shape
         if len(original_shape) == 4:
             new_imgs = new_imgs.squeeze(1)
@@ -157,7 +151,6 @@ class NoisyFlowDataModule(FlowDataModule):
 
 
 def main():
-    """Main function to run the noisy fine-tuning."""
     log_dir = "finetune_of_noise/logs"
     os.makedirs(log_dir, exist_ok=True)
     log_file_path = os.path.join(log_dir, f"train_noisy_{datetime.now().strftime('%Y%m%d-%H%M%S')}.log")
@@ -213,7 +206,6 @@ def main():
             return h
         _DPConvGRU.forward = _safe_cat_forward
         _DPCGUGRU.forward = _safe_cat_forward
-        logger.info("--- Applied ConvGRU size-mismatch monkey-patch ---")
     except Exception as e:
         logger.warning(f"Failed to patch ConvGRU for size mismatches: {e}")
 
@@ -233,7 +225,6 @@ def main():
     datamodule.sintel_dstype = args["sintel_dstype"]
     
     def _patched_load_dataset_paths(self):
-        logger.info("--- Applying monkey-patch to populate dataset_paths ---")
         self.dataset_paths = {'sintel': self.sintel_root_dir}
     datamodule._load_dataset_paths = types.MethodType(_patched_load_dataset_paths, datamodule)
 
