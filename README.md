@@ -1,87 +1,61 @@
-## Zero-TIG: Temporal Consistency-Aware Zero-Shot Illumination-Guided Low-light Video Enhancement
 
 
-Yini Li, Nantheera Anantrasirichai
 
-[[Paper]](https://arxiv.org/abs/2503.11175)
+### Finetuning optical flow models on synthetic noise.
+- Contains scripts for finetuning optical flow models with synthetic noise on the Sintel dataset.
+1. *train_noisy_dpflow.py* DPFlow (Forward flow) - Simulates denoising process of I(t-1) based on the illumination channel, and I(t) using Gaussian blur, simulating the denoising kernel
+2. *train_noisy_dpflow_bwd.py* DPFlow (Backward flow) - Both I(t) and I(t+1) are processed the same as I(t) above.
+3. *train_noisy_raft.py* RAFT (Forward flow) - Same as (1) with RAFT model.
 
----
-## Overview
-![](.\illustration\Network_pipeline.png)
-We proposed Zero-TIG, a zero-shot self-supervised
-method for low-light video enhancement. Additionally, an adaptive white
-balance is introduced for underwater data, achieving temporal
-coherence and color accuracy without paired training data.
+### Bidirectional Image Warping
+```model.py```
 
----
-
-## Dataset
+#### CHANGES:
+- **Forward-backward temporal consistency:** Pixels that do not appear in both forward and backward warping of a frame are added to occlusion map. 
+- **Bidirectional optical flow:** Calculates optical flow for I(t-1)->I(t) and I(t+1)->I(t), then uses the calculated occluded regions to blend together a best estimate for the warped image. 
 
 
-For BVI-RLV dataset, please refer to the [website](https://ieee-dataport.org/open-access/bvi-lowlight-fully-registered-datasets-low-light-image-and-video-enhancement).
+### Running the scripts
+```run_pipeline.py```
 
-Data Structure:
+#### Examples:
+
+**Full training + evaluation:**
+python run_pipeline.py --weights_dir ./weights/ --pretrain_weights_file BVI-RLV.pt --base_exp_dir ./results/ --num_workers 12 --epochs 5 --of_model_name dpflow --of_model_path ./weights/dpflow-sintel-enhancement-finetuned.pth  --data_root ./lowlight_dataset/  --of_model_path_bwd ./weights/dpflow-sintel-noisy-backward-finetuned.pth --of_model_name_bwd dpflow
+
+**Evaluation only:**
+--evaluation_only --pretrain_weight_file [weights.pt]
+
+**Training on specific sequence:**
+--target_sequence [path_to_seq]
+
+
+Results using these models on BVI_RLV dataset:
+
+<img width="849" height="163" alt="image" src="https://github.com/user-attachments/assets/cc8b1f4e-c4f2-4d8b-a605-97802cc28618" />
+
+
+
+### Suggested Improvements:
+
+#### Hyperparemeter optimisation:
+Occlusion / Warping hyperparameters:
+ - occlusion_threshold (trained: 0.5)
+ - flow_consistency_alpha (trained: 0.01)
+ - fusion_confidence_threshold (trained: 0.1)
+
+Training Noisy optical flow mdoels:
+- noise_probability
+- noise_params_range (alpha_brightness, gamma_brightness, band_noise, ...)
+- lr (trained: 5e-5)
+- 
+
+General:
+ - Epochs (trained: 5)
+ - Changing loss fucntion: I found that the loss was not reflecting the model metrics (especially the PSNR)
+
+
+
 ```
-.
-└── BVI-RLV dataset
-    ├── input
-    │   ├── S01
-    │   │   ├── low_light_10
-    │   │   └── low_light_20
-    │   ├── S02
-    │   │   ├── low_light_10
-    │   │   └── low_light_20
-    │   └── ...
-    └── gt
-        ├── S01
-        │   ├── normal_light_10
-        │   └── normal_light_20
-        ├── S02
-        │   ├── normal_light_10
-        │   └── normal_light_20
-        └── ...
-```
-
----
-
-## Training
-- For the training of BVI-RLV, you can refer to the command below:
-```shell
-python train.py --lowlight_images_path <path_to_folder> --dataset RLV
-```
-
-- For the training of underwater data, you can refer to the command below:
-```shell
-python train.py --lowlight_images_path <path_to_folder> --dataset underwater
-```
-
-- If you want to train your own dataset, please adapt the `dataloader\multi_read_data.py` to your dataset.
-
----
-
-## Prediction
-- For the prediction of BVI-RLV, you can refer to the command below:
-```shell
-python predict.py --lowlight_images_path <path_to_folder> --model_pretrain <path_to_model> --dataset RLV
-```
-
-- For the prediction of underwater data, you can refer to the command below:
-```shell
-python train.py --lowlight_images_path <path_to_folder> --model_pretrain <path_to_model> --dataset underwater
-```
-
----
-
-## Citation
-
-```bibtex
-@misc{li2025zerotigtemporalconsistencyawarezeroshot,
-      title={Zero-TIG: Temporal Consistency-Aware Zero-Shot Illumination-Guided Low-light Video Enhancement}, 
-      author={Yini Li and Nantheera Anantrasirichai},
-      year={2025},
-      eprint={2503.11175},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2503.11175}, 
-}
+ Starting sequence pipeline with arguments: Namespace(data_root='./lowlight_dataset/', list_file='train_list.txt', dataset='RLV', weights_dir='./weights/', pretrain_weights_file='BVI-RLV.pt', base_exp_dir='./results/', evaluation_only=False, num_workers=12, epochs=5, of_model_path='./weights/dpflow-sintel-enhancement-finetuned.pth', of_model_name='dpflow', of_model_path_bwd='./weights/dpflow-sintel-noisy-backward-finetuned.pth', of_model_name_bwd='dpflow', of_scale=3, occlusion_threshold=0.5, flow_consistency_alpha=0.01, fusion_confidence_threshold=0.1, disable_bidirectional_warp=False, target_sequence=None)
 ```
