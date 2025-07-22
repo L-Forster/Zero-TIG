@@ -62,7 +62,7 @@ class NoisyFlowDataModule(FlowDataModule):
                     "band_noise_temp": [0.2, 0.8], "periodic0": [0.0, 0.6], "periodic1": [0.0, 0.6],
                     "periodic2": [0.0, 0.6], "band_noise_angle": [0.0, 1.0],
                 }
-            else:  
+            else:
                 self.noise_params_range = {
                     "alpha_brightness": [0.1, 0.6], "gamma_brightness": [0.1, 0.6], "shot_noise_log": [0.3, 1.0],
                     "read_noise_scale": [0.3, 0.8], "read_noise_tlambda": [0.2, 0.9], "quant_noise": [0.1, 0.7],
@@ -88,11 +88,9 @@ class NoisyFlowDataModule(FlowDataModule):
         return batch
 
     def _process_as_noisy(self, frame_clean: torch.Tensor) -> torch.Tensor:
-
         B, C, H, W = frame_clean.shape
         device = frame_clean.device
 
-        # Add synthetic noise
         noisy_img = frame_clean
         if torch.rand(1).item() <= self.noise_probability:
             rows = []
@@ -105,11 +103,9 @@ class NoisyFlowDataModule(FlowDataModule):
             frame_norm = frame_clean / 255.0 if scaled else frame_clean
             noisy_img_norm = generate_noise(frame_norm, noise_dict, self.noise_model, num_frames=1, device=device)
             noisy_img = noisy_img_norm * 255.0 if scaled else noisy_img_norm
-        
-        # Gaussian blur is used to simulate the effect of the main model's kernel.
+
         denoised_img = gaussian_blur(noisy_img, kernel_size=5, sigma=1.5)
         
-        # Apply Histogram Equalisation
         equalized_img = torch.zeros_like(denoised_img)
         for b in range(B):
             img_uint8 = denoised_img[b].clamp(0, 255).to(torch.uint8)
@@ -118,9 +114,6 @@ class NoisyFlowDataModule(FlowDataModule):
         return equalized_img
 
     def _apply_noise_to_batch(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """
-        This function adapts the batch for backward flow training.
-        """
         images = batch.get("images", None)
         forward_flow = batch.get("flow", None)
         if images is None or forward_flow is None:
@@ -130,7 +123,6 @@ class NoisyFlowDataModule(FlowDataModule):
         B, N, C, H, W = images.shape
         assert N == 2, "This logic requires a pair of frames."
 
-        # The input frames are I(t) and I(t+1)
         img_t = images[:, 0]
         img_t_plus_1 = images[:, 1]
 
@@ -138,7 +130,6 @@ class NoisyFlowDataModule(FlowDataModule):
         processed_t_plus_1 = self._process_as_noisy(img_t_plus_1)
 
         new_imgs = torch.stack([processed_t_plus_1, processed_t], dim=1)
-        # Generate the backward flow ground truth by negating the forward flow
         backward_flow = -forward_flow
         
         batch['images'] = new_imgs
@@ -150,42 +141,22 @@ class NoisyFlowDataModule(FlowDataModule):
 def main():
     log_dir = "finetune_of_noise/logs"
     os.makedirs(log_dir, exist_ok=True)
-    log_file_path = os.path.join(log_dir, f"train_noisy_backward_{datetime.now().strftime('%Y%m%d-%H%M%S')}.log")
+    log_file_path = os.path.join(log_dir, f"train_noisy_backward_raft_{datetime.now().strftime('%Y%m%d-%H%M%S')}.log")
     logger.add(log_file_path, rotation="10 MB")
 
     args = {
-        "model": "dpflow", "ckpt_path": "things", "train_dataset": "sintel", "val_dataset": "sintel",
+        "model": "raft", "ckpt_path": "sintel", "train_dataset": "sintel", "val_dataset": "sintel",
         "mpi_sintel_root_dir": "./finetune_of_noise/MPI-Sintel-complete/",
-        "noise_model": "starlight", "noise_probability": 0.8, "train_batch_size": 4, "lr": 5e-5,
+        "noise_model": "starlight", "noise_probability": 0.8, "train_batch_size": 4, "lr": 2e-5,
         "max_epochs": 100, "accelerator": "auto", "sintel_dstype": "final", "gradient_clip_val": 1.0,
         "val_check_interval": 0.25, "train_crop_size": [320, 640], "val_crop_size": [320, 640],
-        "corr_mode": "allpairs",
     }
-    _print_untested_warning()
+    _print_warning()
 
     logger.info(f"Loading model: {args['model']}")
     model = ptlflow.get_model(args["model"], ckpt_path=args["ckpt_path"])
     model.lr = args["lr"]
-    model.output_stride = 8
     
-    if hasattr(model, 'pyramid_levels'): model.pyramid_levels = 3
-    if hasattr(model, 'mixed_precision'): model.mixed_precision = True
-
-    try:
-        from ptlflow.models.dpflow.update import ConvGRU as _DPConvGRU, CGUGRU as _DPCGUGRU
-        def _safe_cat_forward(self, h, x):
-            if h.shape[-2:] != x.shape[-2:]:
-                _, _, Hh, Wh = h.shape; _, _, Hx, Wx = x.shape
-                min_h, min_w = min(Hh, Hx), min(Wh, Wx)
-                h, x = h[..., :min_h, :min_w], x[..., :min_h, :min_w]
-            hx = torch.cat([h, x], dim=1); z = torch.sigmoid(self.convz(hx)) if hasattr(self, 'convz') else None
-            r = torch.sigmoid(self.convr(hx)); q = torch.tanh(self.convq(torch.cat([r * h, x], dim=1)))
-            h = (1 - z) * h + z * q if z is not None else h
-            return h
-        _DPConvGRU.forward, _DPCGUGRU.forward = _safe_cat_forward, _safe_cat_forward
-    except Exception as e:
-        logger.warning(f"Failed to patch ConvGRU for size mismatches: {e}")
-
     logger.info(f"Loading dataset: {args['train_dataset']} for BACKWARD flow training")
     
     datamodule = NoisyFlowDataModule(
@@ -208,8 +179,6 @@ def main():
 
     logger.info("Setting up trainer.")
     early_stopping_callback = EarlyStopping(monitor="val_sintel_clean_final/val/epe", patience=5, mode="min")
-    model.optimizer = torch.optim.AdamW
-    model.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR
 
     trainer = PTLFlowTrainer(
         accelerator=args["accelerator"], max_epochs=args["max_epochs"],
@@ -224,11 +193,11 @@ def main():
     logger.info("Training completed successfully!")
 
 
-def _print_untested_warning():
+def _print_warning():
     print("###########################################################################")
-    print("#           Training BACKWARD flow with NOISY-to-NOISY simulation         #")
+    print("#      Fine-tuning RAFT for BACKWARD flow with NOISY-to-NOISY simulation    #")
     print("###########################################################################")
 
 
 if __name__ == "__main__":
-    main()
+    main() 
