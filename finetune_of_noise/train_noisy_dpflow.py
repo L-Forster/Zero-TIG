@@ -119,7 +119,10 @@ class NoisyFlowDataModule(FlowDataModule):
         # Create the "pseudo L2" from the CURRENT frame
         noisy_img2 = curr_frame_clean
         if torch.rand(1).item() <= self.noise_probability:
-            rows = [[torch.rand(1).item() for _ in self.noise_params_range] for _ in range(B)]
+            rows = []
+            for _ in range(B):
+                row = [torch.rand(1).item() * (hi - lo) + lo for _, (lo, hi) in self.noise_params_range.items()]
+                rows.append(row)
             noise_tensor = torch.tensor(rows, device=device)
             noise_dict = reshape_noise_params(noise_tensor, self.noise_model, num_frames=1)
 

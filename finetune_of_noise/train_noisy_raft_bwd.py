@@ -145,7 +145,7 @@ def main():
     logger.add(log_file_path, rotation="10 MB")
 
     args = {
-        "model": "raft", "ckpt_path": "sintel", "train_dataset": "sintel", "val_dataset": "sintel",
+        "model": "raft", "ckpt_path": "things", "train_dataset": "sintel", "val_dataset": "sintel",
         "mpi_sintel_root_dir": "./finetune_of_noise/MPI-Sintel-complete/",
         "noise_model": "starlight", "noise_probability": 0.8, "train_batch_size": 4, "lr": 2e-5,
         "max_epochs": 100, "accelerator": "auto", "sintel_dstype": "final", "gradient_clip_val": 1.0,

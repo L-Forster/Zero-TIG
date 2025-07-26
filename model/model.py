@@ -233,7 +233,7 @@ class Network(nn.Module):
         image = Image.open(path).convert('RGB')
         return to_tensor(image).unsqueeze(0).to(self.last_H3.device)
 
-    def _compute_single_flow(self, img1, img2, model):
+    def _compute_single_flow(self, img1, img2, model, equalize1=True, equalize2=True):
         with torch.no_grad():
             ht_org, wd_org = img1.shape[-2:]
             ht, wd = ht_org // self.of_scale, wd_org // self.of_scale
@@ -241,17 +241,14 @@ class Network(nn.Module):
             img1_scaled = F.interpolate(img1, (ht, wd), mode='bilinear', align_corners=False)
             img2_scaled = F.interpolate(img2, (ht, wd), mode='bilinear', align_corners=False)
 
-            img1_flow = equalize((img1_scaled * 255).to(torch.uint8)).float()
-            img2_flow = equalize((img2_scaled * 255).to(torch.uint8)).float()
+            img1_flow = equalize((img1_scaled * 255).to(torch.uint8)).float() if equalize1 else (img1_scaled * 255).float()
+            img2_flow = equalize((img2_scaled * 255).to(torch.uint8)).float() if equalize2 else (img2_scaled * 255).float()
 
             model = model.to(img1.device)
 
             flow = None
             if isinstance(model, RAFT):
-                padder = InputPadder(img1_flow.shape[-2:])
-                img1_padded, img2_padded = padder.pad(img1_flow, img2_flow)
-                _, flow = model(img1_padded, img2_padded, iters=20, test_mode=True)
-                flow = padder.unpad(flow)
+                _, flow = model(img1_flow, img2_flow, iters=20, test_mode=True)
             else: # ptlflow model
                 inputs = {'images': torch.stack([img1_flow, img2_flow], dim=1)}
                 try:
@@ -265,9 +262,9 @@ class Network(nn.Module):
             flow_up[:, 1] *= ht_org / flow.shape[2]
             return flow_up
 
-    def _compute_bidirectional_flow(self, img1, img2, model):
-        flow_fwd = self._compute_single_flow(img1, img2, model)
-        flow_bwd = self._compute_single_flow(img2, img1, model)
+    def _compute_bidirectional_flow(self, img1, img2, model, equalize1=True, equalize2=True):
+        flow_fwd = self._compute_single_flow(img1, img2, model, equalize1, equalize2)
+        flow_bwd = self._compute_single_flow(img2, img1, model, equalize2, equalize1)
         return flow_fwd, flow_bwd
 
     def _get_occlusion_mask(self, flow_fwd, flow_bwd):
@@ -285,7 +282,7 @@ class Network(nn.Module):
     def update_cache(self, last_H3, last_s3, L2, img_path):
 
         # Forward warp (t-1 -> t)
-        flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model)
+        flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model, equalize1=False, equalize2=True)
         mask_fwd = self._get_occlusion_mask(flow_fwd, flow_fwd_bwd)
         warped_H3_fwd, _ = warp_tensor(flow_fwd, last_H3, L2)
         warped_s3_fwd, _ = warp_tensor(flow_fwd, last_s3, L2)
@@ -301,8 +298,8 @@ class Network(nn.Module):
                     L2_next_denoised = L2_next_processed - self.denoise_1(L2_next_processed)
                     L2_next = torch.clamp(L2_next_denoised, eps, 1)
 
-                    flow_bwd = self._compute_single_flow(L2_next, L2, self.of_model_bwd)
-                    flow_bwd_fwd = self._compute_single_flow(L2, L2_next, self.of_model_bwd)
+                    flow_bwd = self._compute_single_flow(L2_next, L2, self.of_model_bwd, equalize1=True, equalize2=True)
+                    flow_bwd_fwd = self._compute_single_flow(L2, L2_next, self.of_model_bwd, equalize1=True, equalize2=True)
                     
                     mask_bwd = self._get_occlusion_mask(flow_bwd, flow_bwd_fwd)
                     warped_H3_bwd, _ = warp_tensor(flow_bwd, L2_next, L2)
@@ -442,7 +439,7 @@ class Finetunemodel(nn.Module):
         image = Image.open(path).convert('RGB')
         return to_tensor(image).unsqueeze(0).to(self.last_H3.device)
 
-    def _compute_single_flow(self, img1, img2, model):
+    def _compute_single_flow(self, img1, img2, model, equalize1=True, equalize2=True):
         with torch.no_grad():
             ht_org, wd_org = img1.shape[-2:]
             ht, wd = ht_org // self.of_scale, wd_org // self.of_scale
@@ -450,17 +447,14 @@ class Finetunemodel(nn.Module):
             img1_scaled = F.interpolate(img1, (ht, wd), mode='bilinear', align_corners=False)
             img2_scaled = F.interpolate(img2, (ht, wd), mode='bilinear', align_corners=False)
 
-            img1_flow = equalize((img1_scaled * 255).to(torch.uint8)).float()
-            img2_flow = equalize((img2_scaled * 255).to(torch.uint8)).float()
+            img1_flow = equalize((img1_scaled * 255).to(torch.uint8)).float() if equalize1 else (img1_scaled * 255).float()
+            img2_flow = equalize((img2_scaled * 255).to(torch.uint8)).float() if equalize2 else (img2_scaled * 255).float()
 
             model = model.to(img1.device)
 
             flow = None
             if isinstance(model, RAFT):
-                padder = InputPadder(img1_flow.shape[-2:])
-                img1_padded, img2_padded = padder.pad(img1_flow, img2_flow)
-                _, flow = model(img1_padded, img2_padded, iters=20, test_mode=True)
-                flow = padder.unpad(flow)
+                _, flow = model(img1_flow, img2_flow, iters=20, test_mode=True)
             else: # ptlflow model
                 inputs = {'images': torch.stack([img1_flow, img2_flow], dim=1)}
                 try:
@@ -474,9 +468,9 @@ class Finetunemodel(nn.Module):
             flow_up[:, 1] *= ht_org / flow.shape[2]
             return flow_up
 
-    def _compute_bidirectional_flow(self, img1, img2, model):
-        flow_fwd = self._compute_single_flow(img1, img2, model)
-        flow_bwd = self._compute_single_flow(img2, img1, model)
+    def _compute_bidirectional_flow(self, img1, img2, model, equalize1=True, equalize2=True):
+        flow_fwd = self._compute_single_flow(img1, img2, model, equalize1, equalize2)
+        flow_bwd = self._compute_single_flow(img2, img1, model, equalize2, equalize1)
         return flow_fwd, flow_bwd
 
     def _get_occlusion_mask(self, flow_fwd, flow_bwd):
@@ -493,7 +487,7 @@ class Finetunemodel(nn.Module):
     
     def update_cache(self, last_H3, last_s3, L2, img_path):
         # Forward warp (t-1 -> t)
-        flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model)
+        flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model, equalize1=False, equalize2=True)
         mask_fwd = self._get_occlusion_mask(flow_fwd, flow_fwd_bwd)
         warped_H3_fwd, _ = warp_tensor(flow_fwd, last_H3, L2)
         warped_s3_fwd, _ = warp_tensor(flow_fwd, last_s3, L2)
@@ -511,8 +505,8 @@ class Finetunemodel(nn.Module):
                     L2_next_denoised = torch.clamp(L2_next_denoised, eps, 1)
 
 
-                    flow_bwd = self._compute_single_flow(L2_next_denoised, L2, self.of_model_bwd)
-                    flow_bwd_fwd = self._compute_single_flow(L2, L2_next_denoised, self.of_model_bwd)
+                    flow_bwd = self._compute_single_flow(L2_next_denoised, L2, self.of_model_bwd, equalize1=True, equalize2=True)
+                    flow_bwd_fwd = self._compute_single_flow(L2, L2_next_denoised, self.of_model_bwd, equalize1=True, equalize2=True)
 
                     mask_bwd = self._get_occlusion_mask(flow_bwd, flow_bwd_fwd)
                     warped_H3_bwd, _ = warp_tensor(flow_bwd, L2_next_raw, L2)
