@@ -140,13 +140,6 @@ def main():
         if args.of_model_path_bwd: eval_cmd.extend(['--of_model_path_bwd', args.of_model_path_bwd])
         if args.of_model_name_bwd: eval_cmd.extend(['--of_model_name_bwd', args.of_model_name_bwd])
 
-        eval_cmd.extend(['--of_scale', str(args.of_scale)])
-        if args.disable_bidirectional_warp:
-            eval_cmd.append('--disable_bidirectional_warp')
-        eval_cmd.extend(['--occlusion_threshold', str(args.occlusion_threshold)])
-        eval_cmd.extend(['--flow_consistency_alpha', str(args.flow_consistency_alpha)])
-        eval_cmd.extend(['--fusion_confidence_threshold', str(args.fusion_confidence_threshold)])
-
         if not run_command(eval_cmd, logger):
             logger.error("Evaluation of the single model failed.")
         else:

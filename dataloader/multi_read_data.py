@@ -63,8 +63,11 @@ class DefaultDataset(BaseDataset):
         img_path = self.train_low_data_names[index]
         ll = self.load_images_transform(img_path)
         img_name = os.path.splitext(os.path.basename(img_path))[0]
-        last_data_name_path = self.last_data_name_path
-        self.last_data_name_path = img_path
+        # Robust previous frame path based on global index
+        if index > 0:
+            last_data_name_path = self.train_low_data_names[index - 1]
+        else:
+            last_data_name_path = img_path
         return ll, img_name, img_path, last_data_name_path
     
     def __len__(self):
@@ -152,12 +155,13 @@ class RLVDataLoader(BaseDataset):
         return img_norm
 
     def __getitem__(self, index):
-        ll = self.load_images_transform(self.train_low_data_names[index])
-        img_name = os.path.splitext(os.path.basename(self.train_low_data_names[index]))[0]
         img_path = self.train_low_data_names[index]
-        last_data_name_path = self.last_data_name_path
-        self.last_data_name_path = img_path
-
+        ll = self.load_images_transform(img_path)
+        img_name = os.path.splitext(os.path.basename(img_path))[0]
+        if index > 0:
+            last_data_name_path = self.train_low_data_names[index - 1]
+        else:
+            last_data_name_path = img_path
         return ll, img_name, img_path, last_data_name_path
 
     def __len__(self):
@@ -215,12 +219,13 @@ class DidDataloader(BaseDataset):
         return img_norm
 
     def __getitem__(self, index):
-        ll = self.load_images_transform(self.train_low_data_names[index])
-        img_name = os.path.splitext(os.path.basename(self.train_low_data_names[index]))[0]
         img_path = self.train_low_data_names[index]
-        last_data_name_path = self.last_data_name_path
-        self.last_data_name_path = img_path
-
+        ll = self.load_images_transform(img_path)
+        img_name = os.path.splitext(os.path.basename(img_path))[0]
+        if index > 0:
+            last_data_name_path = self.train_low_data_names[index - 1]
+        else:
+            last_data_name_path = img_path
         return ll, img_name, img_path, last_data_name_path
 
     def __len__(self):
@@ -340,12 +345,13 @@ class SDSDDataloader(BaseDataset):
         return img_norm
 
     def __getitem__(self, index):
-        ll = self.load_images_transform(self.train_low_data_names[index])
-        img_name = os.path.splitext(os.path.basename(self.train_low_data_names[index]))[0]
         img_path = self.train_low_data_names[index]
-        last_data_name_path = self.last_data_name_path
-        self.last_data_name_path = img_path
-
+        ll = self.load_images_transform(img_path)
+        img_name = os.path.splitext(os.path.basename(img_path))[0]
+        if index > 0:
+            last_data_name_path = self.train_low_data_names[index - 1]
+        else:
+            last_data_name_path = img_path
         return ll, img_name, img_path, last_data_name_path
 
     def __len__(self):

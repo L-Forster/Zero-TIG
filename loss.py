@@ -309,4 +309,3 @@ class SmoothLoss(nn.Module):
 
         total_term = ReguTerm1
         return total_term
-

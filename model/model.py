@@ -233,7 +233,7 @@ class Network(nn.Module):
         image = Image.open(path).convert('RGB')
         return to_tensor(image).unsqueeze(0).to(self.last_H3.device)
 
-    def _compute_single_flow(self, img1, img2, model, equalize1=True, equalize2=True):
+    def _compute_single_flow(self, img1, img2, model):
         with torch.no_grad():
             ht_org, wd_org = img1.shape[-2:]
             ht, wd = ht_org // self.of_scale, wd_org // self.of_scale
@@ -241,14 +241,17 @@ class Network(nn.Module):
             img1_scaled = F.interpolate(img1, (ht, wd), mode='bilinear', align_corners=False)
             img2_scaled = F.interpolate(img2, (ht, wd), mode='bilinear', align_corners=False)
 
-            img1_flow = equalize((img1_scaled * 255).to(torch.uint8)).float() if equalize1 else (img1_scaled * 255).float()
-            img2_flow = equalize((img2_scaled * 255).to(torch.uint8)).float() if equalize2 else (img2_scaled * 255).float()
+            img1_flow = equalize((img1_scaled * 255).to(torch.uint8)).float()
+            img2_flow = equalize((img2_scaled * 255).to(torch.uint8)).float()
 
             model = model.to(img1.device)
 
             flow = None
             if isinstance(model, RAFT):
-                _, flow = model(img1_flow, img2_flow, iters=20, test_mode=True)
+                padder = InputPadder(img1_flow.shape[-2:])
+                img1_padded, img2_padded = padder.pad(img1_flow, img2_flow)
+                _, flow = model(img1_padded, img2_padded, iters=20, test_mode=True)
+                flow = padder.unpad(flow)
             else: # ptlflow model
                 inputs = {'images': torch.stack([img1_flow, img2_flow], dim=1)}
                 try:
@@ -262,9 +265,9 @@ class Network(nn.Module):
             flow_up[:, 1] *= ht_org / flow.shape[2]
             return flow_up
 
-    def _compute_bidirectional_flow(self, img1, img2, model, equalize1=True, equalize2=True):
-        flow_fwd = self._compute_single_flow(img1, img2, model, equalize1, equalize2)
-        flow_bwd = self._compute_single_flow(img2, img1, model, equalize2, equalize1)
+    def _compute_bidirectional_flow(self, img1, img2, model):
+        flow_fwd = self._compute_single_flow(img1, img2, model)
+        flow_bwd = self._compute_single_flow(img2, img1, model)
         return flow_fwd, flow_bwd
 
     def _get_occlusion_mask(self, flow_fwd, flow_bwd):
@@ -280,52 +283,58 @@ class Network(nn.Module):
         return occlusion_mask
 
     def update_cache(self, last_H3, last_s3, L2, img_path):
-
-        # Forward warp (t-1 -> t)
-        flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model, equalize1=False, equalize2=True)
+        # This function is now guaranteed to be the same for both training and fine-tuning.
+        flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model)
         mask_fwd = self._get_occlusion_mask(flow_fwd, flow_fwd_bwd)
         warped_H3_fwd, _ = warp_tensor(flow_fwd, last_H3, L2)
         warped_s3_fwd, _ = warp_tensor(flow_fwd, last_s3, L2)
 
-        # Backward warp (t+1 -> t) if possible
         if self.use_bidirectional_warp:
+            print(f"Using bidirectional warp for {img_path}")
             next_frame_path = get_next_frame_path(img_path)
             if next_frame_path:
                 try:
+                    # 1. Load frame and FIX BATCH SIZE
                     L2_next = self._load_frame(next_frame_path)
+                    batch_size = L2.shape[0]
+                    if L2_next.shape[0] != batch_size:
+                        L2_next = L2_next.repeat(batch_size, 1, 1, 1)
+                    # Ensure spatial match with current frame
+                    if L2_next.shape[-2:] != L2.shape[-2:]:
+                        L2_next = F.interpolate(L2_next, size=L2.shape[-2:], mode='bilinear', align_corners=False)
+
+                    # 2. Denoise and RE-ASSIGN THE VARIABLE
                     eps = 1e-4
                     L2_next_processed = L2_next + eps
                     L2_next_denoised = L2_next_processed - self.denoise_1(L2_next_processed)
                     L2_next = torch.clamp(L2_next_denoised, eps, 1)
 
-                    flow_bwd = self._compute_single_flow(L2_next, L2, self.of_model_bwd, equalize1=True, equalize2=True)
-                    flow_bwd_fwd = self._compute_single_flow(L2, L2_next, self.of_model_bwd, equalize1=True, equalize2=True)
-                    
+                    # 3. Compute flow on denoised frames
+                    flow_bwd = self._compute_single_flow(L2_next, L2, self.of_model_bwd)
+                    flow_bwd_fwd = self._compute_single_flow(L2, L2_next, self.of_model_bwd)
                     mask_bwd = self._get_occlusion_mask(flow_bwd, flow_bwd_fwd)
+
+                    # 4. Warp the SAME denoised frame
                     warped_H3_bwd, _ = warp_tensor(flow_bwd, L2_next, L2)
 
+                    # ... Fusion logic ...
                     confidence_fwd = 1.0 - mask_fwd
                     confidence_bwd = 1.0 - mask_bwd
-                    total_confidence = confidence_fwd + confidence_bwd + 1e-8 # Avoid division by zero
-                    
+                    total_confidence = confidence_fwd + confidence_bwd + 1e-8
                     w_fwd = confidence_fwd / total_confidence
                     w_bwd = confidence_bwd / total_confidence
-
                     blended_H3 = w_fwd * warped_H3_fwd + w_bwd * warped_H3_bwd
-
                     is_occluded = (confidence_fwd + confidence_bwd < self.fusion_confidence_threshold).float()
                     final_H3 = blended_H3 * (1 - is_occluded) + L2 * is_occluded
                     final_s3 = warped_s3_fwd
 
                     return final_H3, final_s3
-                except Exception:
+                except Exception as e:
+                    print(f"WARNING: Bidirectional warp failed: {e}. Using fallback.")
                     pass
 
-        # Fallback to forward-only warp
-        final_H3 = warped_H3_fwd
-        final_s3 = warped_s3_fwd
-        
-        return final_H3, final_s3
+        return warped_H3_fwd, warped_s3_fwd
+
 
 
 class Finetunemodel(nn.Module):
@@ -439,7 +448,7 @@ class Finetunemodel(nn.Module):
         image = Image.open(path).convert('RGB')
         return to_tensor(image).unsqueeze(0).to(self.last_H3.device)
 
-    def _compute_single_flow(self, img1, img2, model, equalize1=True, equalize2=True):
+    def _compute_single_flow(self, img1, img2, model):
         with torch.no_grad():
             ht_org, wd_org = img1.shape[-2:]
             ht, wd = ht_org // self.of_scale, wd_org // self.of_scale
@@ -447,14 +456,17 @@ class Finetunemodel(nn.Module):
             img1_scaled = F.interpolate(img1, (ht, wd), mode='bilinear', align_corners=False)
             img2_scaled = F.interpolate(img2, (ht, wd), mode='bilinear', align_corners=False)
 
-            img1_flow = equalize((img1_scaled * 255).to(torch.uint8)).float() if equalize1 else (img1_scaled * 255).float()
-            img2_flow = equalize((img2_scaled * 255).to(torch.uint8)).float() if equalize2 else (img2_scaled * 255).float()
+            img1_flow = equalize((img1_scaled * 255).to(torch.uint8)).float()
+            img2_flow = equalize((img2_scaled * 255).to(torch.uint8)).float()
 
             model = model.to(img1.device)
 
             flow = None
             if isinstance(model, RAFT):
-                _, flow = model(img1_flow, img2_flow, iters=20, test_mode=True)
+                padder = InputPadder(img1_flow.shape[-2:])
+                img1_padded, img2_padded = padder.pad(img1_flow, img2_flow)
+                _, flow = model(img1_padded, img2_padded, iters=20, test_mode=True)
+                flow = padder.unpad(flow)
             else: # ptlflow model
                 inputs = {'images': torch.stack([img1_flow, img2_flow], dim=1)}
                 try:
@@ -468,9 +480,9 @@ class Finetunemodel(nn.Module):
             flow_up[:, 1] *= ht_org / flow.shape[2]
             return flow_up
 
-    def _compute_bidirectional_flow(self, img1, img2, model, equalize1=True, equalize2=True):
-        flow_fwd = self._compute_single_flow(img1, img2, model, equalize1, equalize2)
-        flow_bwd = self._compute_single_flow(img2, img1, model, equalize2, equalize1)
+    def _compute_bidirectional_flow(self, img1, img2, model):
+        flow_fwd = self._compute_single_flow(img1, img2, model)
+        flow_bwd = self._compute_single_flow(img2, img1, model)
         return flow_fwd, flow_bwd
 
     def _get_occlusion_mask(self, flow_fwd, flow_bwd):
@@ -486,52 +498,54 @@ class Finetunemodel(nn.Module):
         return occlusion_mask
     
     def update_cache(self, last_H3, last_s3, L2, img_path):
-        # Forward warp (t-1 -> t)
-        flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model, equalize1=False, equalize2=True)
+        # This function is now guaranteed to be the same for both training and fine-tuning.
+        flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model)
         mask_fwd = self._get_occlusion_mask(flow_fwd, flow_fwd_bwd)
         warped_H3_fwd, _ = warp_tensor(flow_fwd, last_H3, L2)
         warped_s3_fwd, _ = warp_tensor(flow_fwd, last_s3, L2)
 
-        # Backward warp (t+1 -> t) if possible
         if self.use_bidirectional_warp:
+            print(f"Using bidirectional warp for {img_path}")
             next_frame_path = get_next_frame_path(img_path)
             if next_frame_path:
                 try:
-                    L2_next_raw = self._load_frame(next_frame_path)
+                    # 1. Load frame and FIX BATCH SIZE
+                    L2_next = self._load_frame(next_frame_path)
+                    batch_size = L2.shape[0]
+                    if L2_next.shape[0] != batch_size:
+                        L2_next = L2_next.repeat(batch_size, 1, 1, 1)
+                    # Ensure spatial match with current frame
+                    if L2_next.shape[-2:] != L2.shape[-2:]:
+                        L2_next = F.interpolate(L2_next, size=L2.shape[-2:], mode='bilinear', align_corners=False)
 
+                    # 2. Denoise and RE-ASSIGN THE VARIABLE
                     eps = 1e-4
-                    L2_next_processed = L2_next_raw + eps
+                    L2_next_processed = L2_next + eps
                     L2_next_denoised = L2_next_processed - self.denoise_1(L2_next_processed)
-                    L2_next_denoised = torch.clamp(L2_next_denoised, eps, 1)
+                    L2_next = torch.clamp(L2_next_denoised, eps, 1)
 
-
-                    flow_bwd = self._compute_single_flow(L2_next_denoised, L2, self.of_model_bwd, equalize1=True, equalize2=True)
-                    flow_bwd_fwd = self._compute_single_flow(L2, L2_next_denoised, self.of_model_bwd, equalize1=True, equalize2=True)
-
+                    # 3. Compute flow on denoised frames
+                    flow_bwd = self._compute_single_flow(L2_next, L2, self.of_model_bwd)
+                    flow_bwd_fwd = self._compute_single_flow(L2, L2_next, self.of_model_bwd)
                     mask_bwd = self._get_occlusion_mask(flow_bwd, flow_bwd_fwd)
-                    warped_H3_bwd, _ = warp_tensor(flow_bwd, L2_next_raw, L2)
 
-                    # 3. Intelligent Fusion
+                    # 4. Warp the SAME denoised frame
+                    warped_H3_bwd, _ = warp_tensor(flow_bwd, L2_next, L2)
+
+                    # ... Fusion logic ...
                     confidence_fwd = 1.0 - mask_fwd
                     confidence_bwd = 1.0 - mask_bwd
-                    total_confidence = confidence_fwd + confidence_bwd + 1e-8 # Avoid division by zero
-                    
+                    total_confidence = confidence_fwd + confidence_bwd + 1e-8
                     w_fwd = confidence_fwd / total_confidence
                     w_bwd = confidence_bwd / total_confidence
-
                     blended_H3 = w_fwd * warped_H3_fwd + w_bwd * warped_H3_bwd
-
                     is_occluded = (confidence_fwd + confidence_bwd < self.fusion_confidence_threshold).float()
-                    
-                    final_H3 = blended_H3 * (1 - is_occluded) + warped_H3_fwd * is_occluded
+                    final_H3 = blended_H3 * (1 - is_occluded) + L2 * is_occluded
                     final_s3 = warped_s3_fwd
 
                     return final_H3, final_s3
-                except Exception:
+                except Exception as e:
+                    print(f"WARNING: Bidirectional warp failed: {e}. Using fallback.")
                     pass
 
-        # Fallback to forward-only warp
-        final_H3 = warped_H3_fwd
-        final_s3 = warped_s3_fwd
-        
-        return final_H3, final_s3
+        return warped_H3_fwd, warped_s3_fwd
