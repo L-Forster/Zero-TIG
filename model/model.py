@@ -272,7 +272,8 @@ class Network(nn.Module):
 
     def _get_occlusion_mask(self, flow_fwd, flow_bwd):
         # Warp backward flow to forward coordinates: sample at x + flow_fwd(x)
-        warped_flow_bwd, _ = warp_tensor(flow_fwd, flow_bwd, flow_bwd)
+        # Our warper samples at (x - flow(x)), so we pass -flow_fwd to achieve (x + flow_fwd(x)).
+        warped_flow_bwd, _ = warp_tensor(-flow_fwd, flow_bwd, flow_bwd)
         
         flow_diff = flow_fwd + warped_flow_bwd
         consistency_error = torch.norm(flow_diff, dim=1, keepdim=True)
@@ -488,7 +489,8 @@ class Finetunemodel(nn.Module):
 
     def _get_occlusion_mask(self, flow_fwd, flow_bwd):
         # Warp backward flow to forward coordinates: sample at x + flow_fwd(x)
-        warped_flow_bwd, _ = warp_tensor(flow_fwd, flow_bwd, flow_bwd)
+        # Our warper samples at (x - flow(x)), so we pass -flow_fwd to achieve (x + flow_fwd(x)).
+        warped_flow_bwd, _ = warp_tensor(-flow_fwd, flow_bwd, flow_bwd)
         
         flow_diff = flow_fwd + warped_flow_bwd
         consistency_error = torch.norm(flow_diff, dim=1, keepdim=True)
