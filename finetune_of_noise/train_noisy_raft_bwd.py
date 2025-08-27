@@ -5,6 +5,7 @@ import torch.nn as nn
 import numpy as np
 import types
 from typing import Dict, Any, Optional
+import argparse
 from loguru import logger
 from lightning.pytorch.callbacks import Callback, EarlyStopping
 from torchvision.transforms.functional import equalize, gaussian_blur
@@ -27,11 +28,12 @@ class SaveWeightsOnlyCallback(Callback):
         self.training_args = training_args
 
     def on_train_end(self, trainer, pl_module):
-        output_dir = "finetune_of_noise/weights"
+        output_dir = "weights_old"
         os.makedirs(output_dir, exist_ok=True)
         model_name = self.training_args["model"]
+        ckpt_name = self.training_args['ckpt_path']
         dataset_name = self.training_args["train_dataset"]
-        output_filename = f"{model_name}-{dataset_name}-noisy-backward-finetuned.pth"
+        output_filename = f"{model_name}-{ckpt_name}-noisy-backward-finetuned.pth"
         output_path = os.path.join(output_dir, output_filename)
         logger.info(f"Training finished. Saving final model weights to {output_path}")
         state_dict = pl_module.state_dict()
@@ -93,10 +95,7 @@ class NoisyFlowDataModule(FlowDataModule):
 
         noisy_img = frame_clean
         if torch.rand(1).item() <= self.noise_probability:
-            rows = []
-            for _ in range(B):
-                row = [torch.rand(1).item() * (hi - lo) + lo for _, (lo, hi) in self.noise_params_range.items()]
-                rows.append(row)
+            rows = [[torch.rand(1).item() for _ in self.noise_params_range] for _ in range(B)]
             noise_tensor = torch.tensor(rows, device=device)
             noise_dict = reshape_noise_params(noise_tensor, self.noise_model, num_frames=1)
             scaled = frame_clean.max() > 1.0
@@ -139,13 +138,23 @@ class NoisyFlowDataModule(FlowDataModule):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Fine-tune RAFT for backward flow with noisy-to-noisy simulation.")
+    parser.add_argument(
+        "--ckpt_path",
+        type=str,
+        default="things",
+        choices=["sintel", "things"],
+        help="Pre-trained RAFT checkpoint to use for initialization.",
+    )
+    cli_args = parser.parse_args()
+
     log_dir = "finetune_of_noise/logs"
     os.makedirs(log_dir, exist_ok=True)
     log_file_path = os.path.join(log_dir, f"train_noisy_backward_raft_{datetime.now().strftime('%Y%m%d-%H%M%S')}.log")
     logger.add(log_file_path, rotation="10 MB")
 
     args = {
-        "model": "raft", "ckpt_path": "things", "train_dataset": "sintel", "val_dataset": "sintel",
+        "model": "raft", "ckpt_path": cli_args.ckpt_path, "train_dataset": "sintel", "val_dataset": "sintel",
         "mpi_sintel_root_dir": "./finetune_of_noise/MPI-Sintel-complete/",
         "noise_model": "starlight", "noise_probability": 0.8, "train_batch_size": 4, "lr": 2e-5,
         "max_epochs": 100, "accelerator": "auto", "sintel_dstype": "final", "gradient_clip_val": 1.0,

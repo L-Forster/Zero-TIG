@@ -296,27 +296,23 @@ class Network(nn.Module):
             next_frame_path = get_next_frame_path(img_path)
             if next_frame_path:
                 try:
-                    # 1. Load frame and FIX BATCH SIZE
                     L2_next = self._load_frame(next_frame_path)
-                    batch_size = L2.shape[0]
-                    if L2_next.shape[0] != batch_size:
-                        L2_next = L2_next.repeat(batch_size, 1, 1, 1)
-                    # Ensure spatial match with current frame
-                    if L2_next.shape[-2:] != L2.shape[-2:]:
-                        L2_next = F.interpolate(L2_next, size=L2.shape[-2:], mode='bilinear', align_corners=False)
+                    # batch_size = L2.shape[0]
+                    # if L2_next.shape[0] != batch_size:
+                    #     L2_next = L2_next.repeat(batch_size, 1, 1, 1)
+                    # # Ensure spatial match with current frame
+                    # if L2_next.shape[-2:] != L2.shape[-2:]:
+                    #     L2_next = F.interpolate(L2_next, size=L2.shape[-2:], mode='bilinear', align_corners=False)
 
-                    # 2. Denoise and RE-ASSIGN THE VARIABLE
                     eps = 1e-4
                     L2_next_processed = L2_next + eps
                     L2_next_denoised = L2_next_processed - self.denoise_1(L2_next_processed)
                     L2_next = torch.clamp(L2_next_denoised, eps, 1)
 
-                    # 3. Compute flow on denoised frames
                     flow_bwd = self._compute_single_flow(L2_next, L2, self.of_model_bwd)
                     flow_bwd_fwd = self._compute_single_flow(L2, L2_next, self.of_model_bwd)
                     mask_bwd = self._get_occlusion_mask(flow_bwd, flow_bwd_fwd)
 
-                    # 4. Warp the SAME denoised frame
                     warped_H3_bwd, _ = warp_tensor(flow_bwd, L2_next, L2)
 
                     # ... Fusion logic ...
@@ -513,27 +509,23 @@ class Finetunemodel(nn.Module):
             next_frame_path = get_next_frame_path(img_path)
             if next_frame_path:
                 try:
-                    # 1. Load frame and FIX BATCH SIZE
                     L2_next = self._load_frame(next_frame_path)
-                    batch_size = L2.shape[0]
-                    if L2_next.shape[0] != batch_size:
-                        L2_next = L2_next.repeat(batch_size, 1, 1, 1)
-                    # Ensure spatial match with current frame
-                    if L2_next.shape[-2:] != L2.shape[-2:]:
-                        L2_next = F.interpolate(L2_next, size=L2.shape[-2:], mode='bilinear', align_corners=False)
+                    # batch_size = L2.shape[0]
+                    # if L2_next.shape[0] != batch_size:
+                    #     L2_next = L2_next.repeat(batch_size, 1, 1, 1)
+                    # # Ensure spatial match with current frame
+                    # if L2_next.shape[-2:] != L2.shape[-2:]:
+                    #     L2_next = F.interpolate(L2_next, size=L2.shape[-2:], mode='bilinear', align_corners=False)
 
-                    # 2. Denoise and RE-ASSIGN THE VARIABLE
                     eps = 1e-4
                     L2_next_processed = L2_next + eps
                     L2_next_denoised = L2_next_processed - self.denoise_1(L2_next_processed)
                     L2_next = torch.clamp(L2_next_denoised, eps, 1)
 
-                    # 3. Compute flow on denoised frames
                     flow_bwd = self._compute_single_flow(L2_next, L2, self.of_model_bwd)
                     flow_bwd_fwd = self._compute_single_flow(L2, L2_next, self.of_model_bwd)
                     mask_bwd = self._get_occlusion_mask(flow_bwd, flow_bwd_fwd)
 
-                    # 4. Warp the SAME denoised frame
                     warped_H3_bwd, _ = warp_tensor(flow_bwd, L2_next, L2)
 
                     # ... Fusion logic ...

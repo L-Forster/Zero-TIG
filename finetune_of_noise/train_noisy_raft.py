@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 import types
 from typing import Any, Dict, Optional
+import argparse
 
 import torch
 import torch.nn.functional as F
@@ -31,9 +32,10 @@ class SaveWeightsOnlyCallback(Callback):
         self.training_args = training_args
 
     def on_train_end(self, trainer, pl_module):
-        out_dir = "finetune_of_noise/weights"
+        out_dir = "weights_old"
         os.makedirs(out_dir, exist_ok=True)
-        fname = f"raft-{self.training_args['train_dataset']}-finetuned-fix-1.pth"
+        ckpt_name = self.training_args['ckpt_path']
+        fname = f"raft-{ckpt_name}-enhancement-finetuned.pth"
         path = os.path.join(out_dir, fname)
         torch.save(pl_module.state_dict(), path)
         logger.info(f"Saved fine-tuned weights to {path}")
@@ -109,11 +111,7 @@ class EnhancementFlowDataModule(FlowDataModule):
 
         noisy_img2 = curr_frame_clean
         if torch.rand(1).item() <= self.noise_probability:
-            rows = []
-            names = list(self.noise_params_range.keys())
-            for _ in range(B):
-                row = [torch.rand(1).item() * (hi - lo) + lo for name, (lo, hi) in self.noise_params_range.items()]
-                rows.append(row)
+            rows = [[torch.rand(1).item() for _ in self.noise_params_range] for _ in range(B)]
             noise_tensor = torch.tensor(rows, device=device)
             noise_dict = reshape_noise_params(noise_tensor, self.noise_model, num_frames=1)
             
@@ -145,13 +143,24 @@ def _print_warning():
 
 def main():
     _print_warning()
+
+    parser = argparse.ArgumentParser(description="Fine-tune RAFT on enhancement-style data.")
+    parser.add_argument(
+        "--ckpt_path",
+        type=str,
+        default="sintel",
+        choices=["sintel", "things"],
+        help="Pre-trained RAFT checkpoint to use.",
+    )
+    cli_args = parser.parse_args()
+
     log_dir = "finetune_of_noise/logs"
     os.makedirs(log_dir, exist_ok=True)
     fname = f"train_enhancement_raft_{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
     logger.add(os.path.join(log_dir, fname), rotation="10 MB")
 
     args = {
-        "model": "raft", "ckpt_path": "things", "train_dataset": "sintel",
+        "model": "raft", "ckpt_path": cli_args.ckpt_path, "train_dataset": "sintel",
         "val_dataset": "sintel", "mpi_sintel_root_dir": "./finetune_of_noise/MPI-Sintel-complete/",
         "noise_model": "starlight", "noise_probability": 0.8, "train_batch_size": 4,
         "lr": 2e-5, "max_epochs": 100, "accelerator": "auto", "sintel_dstype": "final",
