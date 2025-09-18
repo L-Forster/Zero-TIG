@@ -31,7 +31,7 @@ class SaveWeightsOnlyCallback(Callback):
         os.makedirs(output_dir, exist_ok=True)
         model_name = self.training_args["model"]
         dataset_name = self.training_args["train_dataset"]
-        output_filename = f"{model_name}-{dataset_name}-noisy-backward-finetuned.pth"
+        output_filename = f"{model_name}-{dataset_name}-noisy-backward-finetuned-3.pth"
         output_path = os.path.join(output_dir, output_filename)
         logger.info(f"Training finished. Saving final model weights to {output_path}")
         state_dict = pl_module.state_dict()
@@ -95,7 +95,10 @@ class NoisyFlowDataModule(FlowDataModule):
         # Add synthetic noise
         noisy_img = frame_clean
         if torch.rand(1).item() <= self.noise_probability:
-            rows = [[torch.rand(1).item() for _ in self.noise_params_range] for _ in range(B)]
+            rows = []
+            for _ in range(B):
+                row = [torch.rand(1).item() * (hi - lo) + lo for _, (lo, hi) in self.noise_params_range.items()]
+                rows.append(row)
             noise_tensor = torch.tensor(rows, device=device)
             noise_dict = reshape_noise_params(noise_tensor, self.noise_model, num_frames=1)
             scaled = frame_clean.max() > 1.0

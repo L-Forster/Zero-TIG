@@ -63,9 +63,9 @@ class DefaultDataset(BaseDataset):
         img_path = self.train_low_data_names[index]
         ll = self.load_images_transform(img_path)
         img_name = os.path.splitext(os.path.basename(img_path))[0]
+        # Robust previous frame path based on global index
         last_data_name_path = self.last_data_name_path
         self.last_data_name_path = img_path
-        return ll, img_name, img_path, last_data_name_path
     
     def __len__(self):
         return self.count
@@ -220,7 +220,6 @@ class DidDataloader(BaseDataset):
         img_path = self.train_low_data_names[index]
         last_data_name_path = self.last_data_name_path
         self.last_data_name_path = img_path
-
         return ll, img_name, img_path, last_data_name_path
 
     def __len__(self):
@@ -345,7 +344,7 @@ class SDSDDataloader(BaseDataset):
         img_path = self.train_low_data_names[index]
         last_data_name_path = self.last_data_name_path
         self.last_data_name_path = img_path
-
+        
         return ll, img_name, img_path, last_data_name_path
 
     def __len__(self):

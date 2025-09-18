@@ -104,7 +104,8 @@ def main():
             '--model_pretrain', pretrain_weights_path,
             '--save', train_base_dir,
             '--epochs', str(args.epochs),
-            '--num_workers', str(args.num_workers)
+            '--num_workers', str(args.num_workers),
+            '--of_scale', str(args.of_scale)
         ]
         if args.of_model_path: train_cmd.extend(['--of_model_path', args.of_model_path])
         if args.of_model_name: train_cmd.extend(['--of_model_name', args.of_model_name])
@@ -139,6 +140,8 @@ def main():
         if args.of_model_name: eval_cmd.extend(['--of_model_name', args.of_model_name])
         if args.of_model_path_bwd: eval_cmd.extend(['--of_model_path_bwd', args.of_model_path_bwd])
         if args.of_model_name_bwd: eval_cmd.extend(['--of_model_name_bwd', args.of_model_name_bwd])
+        eval_cmd.extend(['--of_scale', str(args.of_scale)])
+        eval_cmd.extend(['--of_scale', str(args.of_scale)])
 
         if not run_command(eval_cmd, logger):
             logger.error("Evaluation of the single model failed.")
@@ -202,7 +205,8 @@ def main():
                     '--model_pretrain', pretrain_weights_path,
                     '--save', train_base_dir,
                     '--epochs', str(args.epochs),
-                    '--num_workers', str(args.num_workers)
+                    '--num_workers', str(args.num_workers),
+                    '--of_scale', str(args.of_scale)
                 ]
                 if args.of_model_path: train_cmd.extend(['--of_model_path', args.of_model_path])
                 if args.of_model_name: train_cmd.extend(['--of_model_name', args.of_model_name])

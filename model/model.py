@@ -271,7 +271,9 @@ class Network(nn.Module):
         return flow_fwd, flow_bwd
 
     def _get_occlusion_mask(self, flow_fwd, flow_bwd):
-        warped_flow_bwd, _ = warp_tensor(flow_fwd, flow_bwd, flow_bwd)
+        # Warp backward flow to forward coordinates: sample at x + flow_fwd(x)
+        # Our warper samples at (x - flow(x)), so we pass -flow_fwd to achieve (x + flow_fwd(x)).
+        warped_flow_bwd, _ = warp_tensor(-flow_fwd, flow_bwd, flow_bwd)
         
         flow_diff = flow_fwd + warped_flow_bwd
         consistency_error = torch.norm(flow_diff, dim=1, keepdim=True)
@@ -283,19 +285,25 @@ class Network(nn.Module):
         return occlusion_mask
 
     def update_cache(self, last_H3, last_s3, L2, img_path):
-
-        # Forward warp (t-1 -> t)
+        # This function is now guaranteed to be the same for both training and fine-tuning.
         flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model)
         mask_fwd = self._get_occlusion_mask(flow_fwd, flow_fwd_bwd)
         warped_H3_fwd, _ = warp_tensor(flow_fwd, last_H3, L2)
         warped_s3_fwd, _ = warp_tensor(flow_fwd, last_s3, L2)
 
-        # Backward warp (t+1 -> t) if possible
         if self.use_bidirectional_warp:
+            print(f"Using bidirectional warp for {img_path}")
             next_frame_path = get_next_frame_path(img_path)
             if next_frame_path:
                 try:
                     L2_next = self._load_frame(next_frame_path)
+                    # batch_size = L2.shape[0]
+                    # if L2_next.shape[0] != batch_size:
+                    #     L2_next = L2_next.repeat(batch_size, 1, 1, 1)
+                    # # Ensure spatial match with current frame
+                    # if L2_next.shape[-2:] != L2.shape[-2:]:
+                    #     L2_next = F.interpolate(L2_next, size=L2.shape[-2:], mode='bilinear', align_corners=False)
+
                     eps = 1e-4
                     L2_next_processed = L2_next + eps
                     L2_next_denoised = L2_next_processed - self.denoise_1(L2_next_processed)
@@ -303,32 +311,28 @@ class Network(nn.Module):
 
                     flow_bwd = self._compute_single_flow(L2_next, L2, self.of_model_bwd)
                     flow_bwd_fwd = self._compute_single_flow(L2, L2_next, self.of_model_bwd)
-                    
                     mask_bwd = self._get_occlusion_mask(flow_bwd, flow_bwd_fwd)
+
                     warped_H3_bwd, _ = warp_tensor(flow_bwd, L2_next, L2)
 
+                    # ... Fusion logic ...
                     confidence_fwd = 1.0 - mask_fwd
                     confidence_bwd = 1.0 - mask_bwd
-                    total_confidence = confidence_fwd + confidence_bwd + 1e-8 # Avoid division by zero
-                    
+                    total_confidence = confidence_fwd + confidence_bwd + 1e-8
                     w_fwd = confidence_fwd / total_confidence
                     w_bwd = confidence_bwd / total_confidence
-
                     blended_H3 = w_fwd * warped_H3_fwd + w_bwd * warped_H3_bwd
-
                     is_occluded = (confidence_fwd + confidence_bwd < self.fusion_confidence_threshold).float()
                     final_H3 = blended_H3 * (1 - is_occluded) + L2 * is_occluded
                     final_s3 = warped_s3_fwd
 
                     return final_H3, final_s3
-                except Exception:
+                except Exception as e:
+                    print(f"WARNING: Bidirectional warp failed: {e}. Using fallback.")
                     pass
 
-        # Fallback to forward-only warp
-        final_H3 = warped_H3_fwd
-        final_s3 = warped_s3_fwd
-        
-        return final_H3, final_s3
+        return warped_H3_fwd, warped_s3_fwd
+
 
 
 class Finetunemodel(nn.Module):
@@ -480,7 +484,9 @@ class Finetunemodel(nn.Module):
         return flow_fwd, flow_bwd
 
     def _get_occlusion_mask(self, flow_fwd, flow_bwd):
-        warped_flow_bwd, _ = warp_tensor(flow_fwd, flow_bwd, flow_bwd)
+        # Warp backward flow to forward coordinates: sample at x + flow_fwd(x)
+        # Our warper samples at (x - flow(x)), so we pass -flow_fwd to achieve (x + flow_fwd(x)).
+        warped_flow_bwd, _ = warp_tensor(-flow_fwd, flow_bwd, flow_bwd)
         
         flow_diff = flow_fwd + warped_flow_bwd
         consistency_error = torch.norm(flow_diff, dim=1, keepdim=True)
@@ -492,52 +498,50 @@ class Finetunemodel(nn.Module):
         return occlusion_mask
     
     def update_cache(self, last_H3, last_s3, L2, img_path):
-        # Forward warp (t-1 -> t)
+        # This function is now guaranteed to be the same for both training and fine-tuning.
         flow_fwd, flow_fwd_bwd = self._compute_bidirectional_flow(last_H3, L2, self.of_model)
         mask_fwd = self._get_occlusion_mask(flow_fwd, flow_fwd_bwd)
         warped_H3_fwd, _ = warp_tensor(flow_fwd, last_H3, L2)
         warped_s3_fwd, _ = warp_tensor(flow_fwd, last_s3, L2)
 
-        # Backward warp (t+1 -> t) if possible
         if self.use_bidirectional_warp:
+            print(f"Using bidirectional warp for {img_path}")
             next_frame_path = get_next_frame_path(img_path)
             if next_frame_path:
                 try:
-                    L2_next_raw = self._load_frame(next_frame_path)
+                    L2_next = self._load_frame(next_frame_path)
+                    # batch_size = L2.shape[0]
+                    # if L2_next.shape[0] != batch_size:
+                    #     L2_next = L2_next.repeat(batch_size, 1, 1, 1)
+                    # # Ensure spatial match with current frame
+                    # if L2_next.shape[-2:] != L2.shape[-2:]:
+                    #     L2_next = F.interpolate(L2_next, size=L2.shape[-2:], mode='bilinear', align_corners=False)
 
                     eps = 1e-4
-                    L2_next_processed = L2_next_raw + eps
+                    L2_next_processed = L2_next + eps
                     L2_next_denoised = L2_next_processed - self.denoise_1(L2_next_processed)
-                    L2_next_denoised = torch.clamp(L2_next_denoised, eps, 1)
+                    L2_next = torch.clamp(L2_next_denoised, eps, 1)
 
-
-                    flow_bwd = self._compute_single_flow(L2_next_denoised, L2, self.of_model_bwd)
-                    flow_bwd_fwd = self._compute_single_flow(L2, L2_next_denoised, self.of_model_bwd)
-
+                    flow_bwd = self._compute_single_flow(L2_next, L2, self.of_model_bwd)
+                    flow_bwd_fwd = self._compute_single_flow(L2, L2_next, self.of_model_bwd)
                     mask_bwd = self._get_occlusion_mask(flow_bwd, flow_bwd_fwd)
-                    warped_H3_bwd, _ = warp_tensor(flow_bwd, L2_next_raw, L2)
 
-                    # 3. Intelligent Fusion
+                    warped_H3_bwd, _ = warp_tensor(flow_bwd, L2_next, L2)
+
+                    # ... Fusion logic ...
                     confidence_fwd = 1.0 - mask_fwd
                     confidence_bwd = 1.0 - mask_bwd
-                    total_confidence = confidence_fwd + confidence_bwd + 1e-8 # Avoid division by zero
-                    
+                    total_confidence = confidence_fwd + confidence_bwd + 1e-8
                     w_fwd = confidence_fwd / total_confidence
                     w_bwd = confidence_bwd / total_confidence
-
                     blended_H3 = w_fwd * warped_H3_fwd + w_bwd * warped_H3_bwd
-
                     is_occluded = (confidence_fwd + confidence_bwd < self.fusion_confidence_threshold).float()
-                    
-                    final_H3 = blended_H3 * (1 - is_occluded) + warped_H3_fwd * is_occluded
+                    final_H3 = blended_H3 * (1 - is_occluded) + L2 * is_occluded
                     final_s3 = warped_s3_fwd
 
                     return final_H3, final_s3
-                except Exception:
+                except Exception as e:
+                    print(f"WARNING: Bidirectional warp failed: {e}. Using fallback.")
                     pass
 
-        # Fallback to forward-only warp
-        final_H3 = warped_H3_fwd
-        final_s3 = warped_s3_fwd
-        
-        return final_H3, final_s3
+        return warped_H3_fwd, warped_s3_fwd

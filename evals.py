@@ -61,7 +61,7 @@ logging.getLogger().addHandler(mertic)
 
 logging.info("train file name = %s", os.path.split(__file__))
 TestDataset = CreateDataset(args, task='test')
-test_queue = torch.utils.data.DataLoader(TestDataset, batch_size=1, pin_memory=True, num_workers=0, shuffle=False)
+test_queue = torch.utils.data.DataLoader(TestDataset, batch_size=1, pin_memory=True, num_workers=12, shuffle=False)
 print("Total image number: ", str(TestDataset.__len__()))
 
 logging.info("Model path = %s", str(args.model_pretrain))
@@ -201,7 +201,9 @@ def main():
         'Total_LPIPS_HM': total_lpips_hm/num_img
     }
     
-    metrics_file_path = os.path.join(args.save, f'{args.name}_Metrics.json')
+    from datetime import datetime
+    now_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+    metrics_file_path = os.path.join(args.save, f'{args.name}_Metrics_{now_str}.json')
     with open(metrics_file_path, 'w') as file:
         json.dump(metrics_data, file, indent=2)
     
