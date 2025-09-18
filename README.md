@@ -43,7 +43,7 @@ python run_pipeline.py --weights_dir ./weights/ --pretrain_weights_file BVI-RLV.
 
 Results using these models on BVI_RLV dataset:
 
-<img width="849" height="163" alt="image" src="https://github.com/user-attachments/assets/cc8b1f4e-c4f2-4d8b-a605-97802cc28618" />
+<img width="1307" height="256" alt="image" src="https://github.com/user-attachments/assets/23466996-513c-47e6-b0e7-a3c402b8d332" />
 
 
 
